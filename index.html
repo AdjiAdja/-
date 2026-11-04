@@ -1,0 +1,1580 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<title>Pondok Embun — Cozy Village Sim</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{width:100%;height:100%;overflow:hidden;background:#100d0c;display:flex;align-items:center;justify-content:center;touch-action:none;-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent;overscroll-behavior:none}
+  canvas{display:block;image-rendering:pixelated;image-rendering:crisp-edges;-ms-interpolation-mode:nearest-neighbor;background:#100d0c}
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<script>
+"use strict";
+/* =========================================================================
+   PONDOK EMBUN — Cozy Village Sim (Original) — FINAL
+   Semua 4 tahap digabung dalam satu file.
+   ========================================================================= */
+
+/* ---------- 1. KONSTANTA ---------- */
+const W = 320, H = 180, TILE = 16;
+const MAP_W = 64, MAP_H = 48;
+const WORLD_W = MAP_W * TILE, WORLD_H = MAP_H * TILE;
+const STEP = 1 / 60;
+const SPEED = 74, NPC_SPEED = 28;
+const INTERACT_RADIUS = 22;
+const SAVE_KEY = 'pondok-embun-save-v1';
+const SAVE_VERSION = 1;
+
+const C = {
+  grass1:'#8ecf6a', grass2:'#79bb58', grass3:'#a8dd85',
+  path1:'#d9b98a',  path2:'#c8a371',  path3:'#e6cda6',
+  sand1:'#f2e2b0',  sand2:'#e6d29a',
+  water1:'#5fbcd8', water2:'#7fd0e8', water3:'#a9e2f2', water4:'#3f9cbe',
+  trunk1:'#8a5c3c', trunk2:'#6b4429',
+  leaf1:'#5aa34a',  leaf2:'#71bd5c',  leaf3:'#8dd374',  leaf4:'#468a3a',
+  wood1:'#c49a6c',  wood2:'#a3764f',  wood3:'#7d5738',
+  roof1:'#d9705f',  roof2:'#b9534a',  roof3:'#e58775',
+  wall1:'#f3e3c8',  wall2:'#e0cba9',
+  stone1:'#c2c7cf', stone2:'#9aa1ab', stone3:'#e2e6ec',
+  glass:'#9fd4e0',  glass2:'#c8eaf2',
+  outline:'#3a2a22',
+  skin:'#f7c9a3', hair:'#6b4a2f', shirt:'#e07a5f', shirtS:'#c25b45',
+  pants:'#4a6fa5', shoe:'#4a3527',
+  uiBorder:'#f3e3c8', uiText:'#f7efdf', uiGold:'#ffcf6b', uiDim:'#b9a99a',
+  uiDark:'#1a1412', uiSelect:'#7ecfff', uiGreen:'#8adf7a', uiRed:'#e87070',
+  floor1:'#a0764f', floor2:'#8a6240', floorLine:'#6b4a32',
+  wallTop:'#5d3f2a', wallBot:'#7d5738'
+};
+
+const T = { GRASS:0, PATH:1, SAND:2, WATER:3, FLOOR:4, WALL:5, DOOR:6 };
+
+/* ---------- 2. UTIL ---------- */
+function makeCanvas(w, h) {
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  const x = c.getContext('2d');
+  x.imageSmoothingEnabled = false;
+  return c;
+}
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+function hash2(x, y, s) {
+  let h = Math.imul(x | 0, 374761393) + Math.imul(y | 0, 668265263) + Math.imul(s | 0, 1442695041);
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  h = h ^ (h >>> 16);
+  return (h >>> 0) / 4294967296;
+}
+function fillCirclePixel(g, cx, cy, r, color) {
+  g.fillStyle = color;
+  const r2 = r * r;
+  for (let y = -r; y <= r; y++) {
+    const span = Math.floor(Math.sqrt(Math.max(0, r2 - y * y)));
+    if (span < 0) continue;
+    g.fillRect(cx - span, cy + y, span * 2 + 1, 1);
+  }
+}
+function drawShadowEllipse(g, cx, cy, rx, ry, color) {
+  g.fillStyle = color;
+  for (let y = -ry; y <= ry; y++) {
+    const t = 1 - (y * y) / (ry * ry);
+    if (t <= 0) continue;
+    const w = Math.round(rx * Math.sqrt(t));
+    if (w <= 0) continue;
+    g.fillRect(cx - w, cy + y, w * 2, 1);
+  }
+}
+
+/* ---------- 3. FONT 5x7 ---------- */
+const FONT_W = 5, FONT_H = 7, FONT_CW = 6, FONT_CH = 8, FONT_COLS = 16;
+const GLYPHS = {
+  'A':[0b01110,0b10001,0b10001,0b11111,0b10001,0b10001,0b10001],'B':[0b11110,0b10001,0b10001,0b11110,0b10001,0b10001,0b11110],'C':[0b01110,0b10001,0b10000,0b10000,0b10000,0b10001,0b01110],'D':[0b11110,0b10001,0b10001,0b10001,0b10001,0b10001,0b11110],'E':[0b11111,0b10000,0b10000,0b11110,0b10000,0b10000,0b11111],'F':[0b11111,0b10000,0b10000,0b11110,0b10000,0b10000,0b10000],'G':[0b01110,0b10001,0b10000,0b10111,0b10001,0b10001,0b01111],'H':[0b10001,0b10001,0b10001,0b11111,0b10001,0b10001,0b10001],'I':[0b01110,0b00100,0b00100,0b00100,0b00100,0b00100,0b01110],'J':[0b00111,0b00010,0b00010,0b00010,0b00010,0b10010,0b01100],'K':[0b10001,0b10010,0b10100,0b11000,0b10100,0b10010,0b10001],'L':[0b10000,0b10000,0b10000,0b10000,0b10000,0b10000,0b11111],'M':[0b10001,0b11011,0b10101,0b10101,0b10001,0b10001,0b10001],'N':[0b10001,0b11001,0b10101,0b10011,0b10001,0b10001,0b10001],'O':[0b01110,0b10001,0b10001,0b10001,0b10001,0b10001,0b01110],'P':[0b11110,0b10001,0b10001,0b11110,0b10000,0b10000,0b10000],'Q':[0b01110,0b10001,0b10001,0b10001,0b10101,0b10010,0b01101],'R':[0b11110,0b10001,0b10001,0b11110,0b10100,0b10010,0b10001],'S':[0b01111,0b10000,0b10000,0b01110,0b00001,0b00001,0b11110],'T':[0b11111,0b00100,0b00100,0b00100,0b00100,0b00100,0b00100],'U':[0b10001,0b10001,0b10001,0b10001,0b10001,0b10001,0b01110],'V':[0b10001,0b10001,0b10001,0b10001,0b10001,0b01010,0b00100],'W':[0b10001,0b10001,0b10001,0b10101,0b10101,0b11011,0b10001],'X':[0b10001,0b10001,0b01010,0b00100,0b01010,0b10001,0b10001],'Y':[0b10001,0b10001,0b01010,0b00100,0b00100,0b00100,0b00100],'Z':[0b11111,0b00001,0b00010,0b00100,0b01000,0b10000,0b11111],
+  '0':[0b01110,0b10001,0b10011,0b10101,0b11001,0b10001,0b01110],'1':[0b00100,0b01100,0b00100,0b00100,0b00100,0b00100,0b01110],'2':[0b01110,0b10001,0b00001,0b00010,0b00100,0b01000,0b11111],'3':[0b11111,0b00010,0b00100,0b00010,0b00001,0b10001,0b01110],'4':[0b00010,0b00110,0b01010,0b10010,0b11111,0b00010,0b00010],'5':[0b11111,0b10000,0b11110,0b00001,0b00001,0b10001,0b01110],'6':[0b00110,0b01000,0b10000,0b11110,0b10001,0b10001,0b01110],'7':[0b11111,0b00001,0b00010,0b00100,0b01000,0b01000,0b01000],'8':[0b01110,0b10001,0b10001,0b01110,0b10001,0b10001,0b01110],'9':[0b01110,0b10001,0b10001,0b01111,0b00001,0b00010,0b01100],
+  ' ':[0,0,0,0,0,0,0],'.':[0,0,0,0,0,0,0b00100],',':[0,0,0,0,0,0b00100,0b01000],'!':[0b00100,0b00100,0b00100,0b00100,0b00100,0,0b00100],'?':[0b01110,0b10001,0b00001,0b00010,0b00100,0,0b00100],'-':[0,0,0,0b11111,0,0,0],'+':[0,0b00100,0b00100,0b11111,0b00100,0b00100,0],':':[0,0b00100,0b00100,0,0b00100,0b00100,0],'/':[0b00001,0b00010,0b00010,0b00100,0b01000,0b01000,0b10000],'(':[0b00010,0b00100,0b01000,0b01000,0b01000,0b00100,0b00010],')':[0b01000,0b00100,0b00010,0b00010,0b00010,0b00100,0b01000],"'":[0b00100,0b00100,0,0,0,0,0],'"':[0b01010,0b01010,0,0,0,0,0],'*':[0,0b10101,0b01110,0b11111,0b01110,0b10101,0],'%':[0b11001,0b11010,0b00010,0b00100,0b01000,0b01011,0b10011],'<':[0b00010,0b00100,0b01000,0b10000,0b01000,0b00100,0b00010],'>':[0b01000,0b00100,0b00010,0b00001,0b00010,0b00100,0b01000],'=':[0,0,0b11111,0,0b11111,0,0],'#':[0b01010,0b01010,0b11111,0b01010,0b11111,0b01010,0b01010]
+};
+const GLYPH_KEYS = Object.keys(GLYPHS);
+const GLYPH_INDEX = {};
+GLYPH_KEYS.forEach((k, i) => { GLYPH_INDEX[k] = i; });
+const fontAtlases = Object.create(null);
+function getFontAtlas(color) {
+  let a = fontAtlases[color];
+  if (a) return a;
+  const rows = Math.ceil(GLYPH_KEYS.length / FONT_COLS);
+  const cv = makeCanvas(FONT_COLS * FONT_CW, rows * FONT_CH);
+  const g = cv.getContext('2d');
+  g.fillStyle = color;
+  for (let i = 0; i < GLYPH_KEYS.length; i++) {
+    const bits = GLYPHS[GLYPH_KEYS[i]];
+    const ox = (i % FONT_COLS) * FONT_CW;
+    const oy = Math.floor(i / FONT_COLS) * FONT_CH;
+    for (let r = 0; r < FONT_H; r++) {
+      const row = bits[r];
+      for (let b = 0; b < FONT_W; b++) {
+        if (row & (1 << (FONT_W - 1 - b))) g.fillRect(ox + b, oy + r, 1, 1);
+      }
+    }
+  }
+  fontAtlases[color] = cv;
+  return cv;
+}
+function textWidth(str) { return str.length * FONT_CW - 1; }
+
+/* ---------- 4. CANVAS ---------- */
+const display = document.getElementById('game');
+const dctx = display.getContext('2d');
+dctx.imageSmoothingEnabled = false;
+const buf = makeCanvas(W, H);
+const ctx = buf.getContext('2d');
+ctx.imageSmoothingEnabled = false;
+function resize() {
+  const s = Math.max(1, Math.floor(Math.min(window.innerWidth / W, window.innerHeight / H)));
+  const dpr = Math.max(1, Math.round(window.devicePixelRatio || 1));
+  display.width = W * s * dpr;
+  display.height = H * s * dpr;
+  display.style.width = (W * s) + 'px';
+  display.style.height = (H * s) + 'px';
+  dctx.imageSmoothingEnabled = false;
+}
+function present() {
+  dctx.imageSmoothingEnabled = false;
+  dctx.drawImage(buf, 0, 0, W, H, 0, 0, display.width, display.height);
+}
+function drawText(str, x, y, color) {
+  str = String(str).toUpperCase();
+  const atlas = getFontAtlas(color);
+  let cx = Math.round(x);
+  const cy = Math.round(y);
+  for (let i = 0; i < str.length; i++) {
+    const ch = str[i];
+    const idx = GLYPH_INDEX[ch];
+    if (idx !== undefined && ch !== ' ') {
+      const sx = (idx % FONT_COLS) * FONT_CW;
+      const sy = Math.floor(idx / FONT_COLS) * FONT_CH;
+      ctx.drawImage(atlas, sx, sy, FONT_CW, FONT_CH, cx, cy, FONT_CW, FONT_CH);
+    }
+    cx += FONT_CW;
+  }
+}
+function drawTextCentered(str, cx, y, color) { drawText(str, Math.round(cx - textWidth(str) / 2), y, color); }
+function drawPanel(x, y, w, h) {
+  x = Math.round(x); y = Math.round(y); w = Math.round(w); h = Math.round(h);
+  ctx.fillStyle = 'rgba(26,20,18,0.94)';
+  ctx.fillRect(x, y, w, h);
+  ctx.fillStyle = C.uiBorder;
+  ctx.fillRect(x, y, w, 1); ctx.fillRect(x, y + h - 1, w, 1);
+  ctx.fillRect(x, y, 1, h); ctx.fillRect(x + w - 1, y, 1, h);
+  ctx.fillStyle = C.uiGold;
+  ctx.fillRect(x, y, 1, 1); ctx.fillRect(x + w - 1, y, 1, 1);
+  ctx.fillRect(x, y + h - 1, 1, 1); ctx.fillRect(x + w - 1, y + h - 1, 1, 1);
+}
+
+/* ---------- 5. INPUT ---------- */
+const Input = {
+  keys: Object.create(null),
+  init() {
+    window.addEventListener('keydown', (e) => {
+      if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].indexOf(e.code) >= 0) e.preventDefault();
+      if (e.repeat) return;
+      this.keys[e.code] = true;
+      AudioSys.userGesture();
+      onKeyPressed(e.code);
+    });
+    window.addEventListener('keyup', (e) => { this.keys[e.code] = false; });
+    window.addEventListener('blur', () => { for (const k in this.keys) this.keys[k] = false; });
+  },
+  isDown(code) { return !!this.keys[code]; }
+};
+const axisVec = { x: 0, y: 0 };
+function getAxis() {
+  let x = 0, y = 0;
+  if (Input.isDown('KeyA') || Input.isDown('ArrowLeft'))  x -= 1;
+  if (Input.isDown('KeyD') || Input.isDown('ArrowRight')) x += 1;
+  if (Input.isDown('KeyW') || Input.isDown('ArrowUp'))    y -= 1;
+  if (Input.isDown('KeyS') || Input.isDown('ArrowDown'))  y += 1;
+  // Touch joystick override
+  if (Touch.active) { x += Touch.axisX; y += Touch.axisY; }
+  if (x > 1) x = 1; if (x < -1) x = -1;
+  if (y > 1) y = 1; if (y < -1) y = -1;
+  axisVec.x = x; axisVec.y = y;
+  return axisVec;
+}
+
+/* ---------- 6. STATE GAME ---------- */
+const game = { state: 'title', paused: false, time: 0, hasSave: false, tutorialShown: false };
+
+/* ---------- 7. ITEM ---------- */
+const ITEMS = {
+  net:    { name: 'Jaring',    isTool: true, desc: 'Tangkap serangga.' },
+  rod:    { name: 'Pancing',   isTool: true, desc: 'Memancing di air.' },
+  shovel: { name: 'Sekop',     isTool: true, desc: 'Menggali tanah.' },
+  axe:    { name: 'Kapak',     isTool: true, desc: 'Menebang pohon.' },
+  water:  { name: 'Penyiram',  isTool: true, desc: 'Menyiram tanaman.' },
+  daun:   { name: 'Daun',      isTool: false, giftValue: 1, sell: 2,  desc: 'Daun segar.' },
+  bunga:  { name: 'Bunga',     isTool: false, giftValue: 3, sell: 4,  desc: 'Bunga cantik.' },
+  apel:   { name: 'Apel',      isTool: false, giftValue: 4, sell: 6,  desc: 'Apel manis.' },
+  wood:   { name: 'Kayu',      isTool: false, giftValue: 2, sell: 8,  desc: 'Kayu dari pohon.' },
+  fosil:  { name: 'Fosil',     isTool: false, giftValue: 5, sell: 50, desc: 'Fosil kuno.' },
+  umpan:  { name: 'Umpan',     isTool: false, giftValue: 1, sell: 3,  desc: 'Umpan pancing.' },
+  seed_bunga: { name: 'Bibit', isTool: false, giftValue: 2, sell: 5, desc: 'Bibit bunga.' },
+  ikan_kecil:  { name: 'Ikan Kecil',  isTool: false, giftValue: 3, sell: 15, category: 'fish', desc: 'Ikan mungil.' },
+  ikan_sedang: { name: 'Ikan Sedang', isTool: false, giftValue: 4, sell: 35, category: 'fish', desc: 'Ikan lumayan.' },
+  ikan_besar:  { name: 'Ikan Besar',  isTool: false, giftValue: 5, sell: 80, category: 'fish', desc: 'Ikan raksasa!' },
+  udang:       { name: 'Udang',       isTool: false, giftValue: 4, sell: 25, category: 'fish', desc: 'Udang segar.' },
+  kupu:     { name: 'Kupu-kupu', isTool: false, giftValue: 3, sell: 20, category: 'bug', desc: 'Kupu warna-warni.' },
+  kumbang:  { name: 'Kumbang',   isTool: false, giftValue: 4, sell: 45, category: 'bug', desc: 'Kumbang berkilau.' },
+  belalang: { name: 'Belalang',  isTool: false, giftValue: 3, sell: 30, category: 'bug', desc: 'Belalang hijau.' }
+};
+
+const ICON_DEFS = {
+  net:{palette:{'1':C.wood2,'2':C.outline,'3':'#e8e8e8'},rows:[".........3333...","........3....3..",".......3......3.",".......3......3.",".......3......3.","........3....3..",".........3333...","........1.......",".......1........","......1.........",".....1..........","....1...........","...1............","..1.............",".1..............","................"]},
+  rod:{palette:{'1':C.wood1,'2':C.wood3,'3':'#d8d8d8'},rows:["...............3","..............31",".............31.","............31..","...........31...","..........31....",".........31.....","........31......",".......31.......","......31........",".....31.........","....31..........","...31...........","..32............",".222............","................"]},
+  shovel:{palette:{'1':C.outline,'2':C.stone1,'3':C.wood2},rows:["..........33....","..........33....","..........33....","..........33....","..........33....","..........33....","..........33....","..........33....","..........33....","........111111..",".......1222221..",".......1222221..","........12221...",".........111....","................","................"]},
+  axe:{palette:{'1':C.wood2,'2':C.stone2,'3':C.stone1},rows:[".....2333.......","....233332......","...23333332.....","...23333332.....","...23333332.....","....233332......",".....2333.......","......11........","......11........","......11........","......11........","......11........","......11........","......11........","......11........","................"]},
+  water:{palette:{'1':C.outline,'2':'#6fa8d0','3':'#9fccea'},rows:["................","................","....11111.......","...1333331......","...1232321.1....","...1232321..1...","...1232321..1...","...1232321.1....","..113232311.....","..133333331.....","..133333331.....","..111111111.....","................","................","................","................"]},
+  daun:{palette:{'1':C.outline,'2':C.leaf1,'3':C.leaf3},rows:["................","................",".......1........","......121.......",".....12321......","....1233321.....","...12333321.....","..123333321.....","..12333321......","...1233321......","....12321.......",".....121........","......1.........","................","................","................"]},
+  bunga:{palette:{'1':C.outline,'2':'#f7a0c0','3':'#ffe9a8','4':C.leaf2},rows:["................","................",".....222........","....23332.......","...2333332......","....23332.......",".....242........","......4.........","......4.........",".....44.........","......4.........","......4.........","................","................","................","................"]},
+  apel:{palette:{'1':C.outline,'2':'#e05050','3':'#f08080','4':C.leaf2},rows:["................","................","......4.........",".....44.........","....1111........","...132231.......","..13222331......","..13222231......","..12222221......","..12222221......","..12222221......","...122221.......","....1111........","................","................","................"]},
+  wood:{palette:{'1':C.outline,'2':C.wood1,'3':C.wood3},rows:["................","................","................","................","...1111111111...","..122222222221..","..123232323221..","..122222222221..","..123232323221..","..122222222221..","..123232323221..","...1111111111...","................","................","................","................"]},
+  fosil:{palette:{'1':C.outline,'2':C.stone1,'3':'#7a6040'},rows:["................","................","......1111......",".....122221.....","....12333321....","....12313321....","....12313321....","....12333321....",".....122221.....","......1111......","................","................","................","................","................","................"]},
+  umpan:{palette:{'1':C.outline,'2':'#e07050','3':'#c0c0c0'},rows:["................","................","................","......111.......",".....12221......","....1222221.....","....1222221.....",".....12221......","......111.......",".......1........",".......1........","......111.......","................","................","................","................"]},
+  seed_bunga:{palette:{'1':C.outline,'2':'#a07050','3':'#f7a0c0'},rows:["................","................","................","................","......1111......",".....123321.....",".....122221.....","......1221......",".......11.......",".......1........","......111.......","................","................","................","................","................"]},
+  ikan_kecil:{palette:{'1':C.outline,'2':'#a0c0e0','3':'#e0e8f0'},rows:["................","................","................","................","................","......1111......",".....122221.....","....12322221....","....122222211...",".....122221.....","......1111......","................","................","................","................","................"]},
+  ikan_sedang:{palette:{'1':C.outline,'2':'#e0a050','3':'#f0d080'},rows:["................","................","................","................","......1111......",".....122221.....","....12322221....","...1233222221...","...1222222211...","....1222221.....",".....12221......","......111.......","................","................","................","................"]},
+  ikan_besar:{palette:{'1':C.outline,'2':'#5070a0','3':'#90a8d0'},rows:["................","................","......1111......",".....122221.....","....12322221....","...1233222221...","..123322222221..","..12322222221...","..1222222221....","...1222221......","....12221.......",".....111........","................","................","................","................"]},
+  udang:{palette:{'1':C.outline,'2':'#f08080','3':'#f0b090'},rows:["................","................","................","................","......11........",".....1221.......","....123221......","....1232221.....","....1232221.....",".....12221......","......11.1......",".........1......",".........11.....","................","................","................"]},
+  kupu:{palette:{'1':C.outline,'2':'#f0a0d0','3':'#f0e0a0'},rows:["................","................","...2.......2....","..232.....232...","..2332...2332...","...222...222....",".....12221......","......111.......",".....12221......","...222...222....","..2332...2332...","..232.....232...","...2.......2....","................","................","................"]},
+  kumbang:{palette:{'1':C.outline,'2':'#4060a0','3':'#90b0e0'},rows:["................","................","......111.......",".....12221......","....1232221.....","....1232221.....","....1222221.....","....1222221.....","....1222221.....","....1232221.....","....1232221.....",".....12221......","......111.......","................","................","................"]},
+  belalang:{palette:{'1':C.outline,'2':'#90c060','3':'#c0e090'},rows:["................","................",".........1......","........121.....",".......12321....","......123321....","......12321.....",".....12321......","....12321.......","...12321........","..12321.........","..1221..........","...11...........","................","................","................"]}
+};
+const itemIcons = Object.create(null);
+function bakeItemIcons() {
+  for (const id in ICON_DEFS) {
+    const def = ICON_DEFS[id];
+    const c = makeCanvas(16, 16);
+    const g = c.getContext('2d');
+    for (let r = 0; r < def.rows.length; r++) {
+      const row = def.rows[r];
+      for (let i = 0; i < row.length; i++) {
+        const col = def.palette[row[i]];
+        if (col) { g.fillStyle = col; g.fillRect(i, r, 1, 1); }
+      }
+    }
+    itemIcons[id] = c;
+  }
+}
+
+/* ---------- 8. INVENTARIS ---------- */
+const inventory = {
+  slots: new Array(20).fill(null),
+  activeTool: 0,
+  add(id, count) {
+    count = count || 1;
+    const item = ITEMS[id];
+    if (!item) return false;
+    const max = item.isTool ? 1 : 99;
+    for (let i = 0; i < this.slots.length; i++) {
+      const s = this.slots[i];
+      if (s && s.id === id && s.count < max) {
+        const add = Math.min(count, max - s.count);
+        s.count += add; count -= add;
+        if (count <= 0) return true;
+      }
+    }
+    for (let i = 0; i < this.slots.length; i++) {
+      if (!this.slots[i]) {
+        const add = Math.min(count, max);
+        this.slots[i] = { id, count: add };
+        count -= add;
+        if (count <= 0) return true;
+      }
+    }
+    return false;
+  },
+  removeAt(idx, count) {
+    count = count || 1;
+    const s = this.slots[idx];
+    if (!s) return false;
+    s.count -= count;
+    if (s.count <= 0) this.slots[idx] = null;
+    return true;
+  },
+  getActive() { return this.slots[this.activeTool]; },
+  cycleTool() {
+    for (let n = 1; n <= 5; n++) {
+      const idx = (this.activeTool + n) % 5;
+      if (this.slots[idx]) { this.activeTool = idx; return; }
+    }
+  }
+};
+const invUI = { open: false, cursor: 0, mode: 'normal' };
+const message = { text: '', timer: 0, show(text, dur) { this.text = text; this.timer = dur || 2; } };
+
+/* ---------- 9. UANG ---------- */
+const money = { amount: 100, add(n) { this.amount += n; }, spend(n) { if (this.amount >= n) { this.amount -= n; return true; } return false; } };
+
+/* ---------- 10. TIME ---------- */
+const TimeSys = {
+  hour: 12, minute: 0, day: 1,
+  update() {
+    const d = new Date();
+    this.hour = d.getHours(); this.minute = d.getMinutes();
+    this.day = Math.floor(Date.now() / 86400000);
+  },
+  getTint() {
+    const h = this.hour + this.minute / 60;
+    if (h >= 5 && h < 7)   return { r: 255, g: 200, b: 160, a: 0.14 };
+    if (h >= 7 && h < 16)  return { r: 255, g: 240, b: 200, a: 0.00 };
+    if (h >= 16 && h < 18) return { r: 255, g: 170, b: 90,  a: 0.22 };
+    if (h >= 18 && h < 20) return { r: 120, g: 90,  b: 160, a: 0.32 };
+    return { r: 30, g: 40, b: 90, a: 0.52 };
+  },
+  getPhase() {
+    const h = this.hour;
+    if (h >= 5 && h < 10) return 'PAGI';
+    if (h >= 10 && h < 15) return 'SIANG';
+    if (h >= 15 && h < 18) return 'SORE';
+    return 'MALAM';
+  },
+  format() { return String(this.hour).padStart(2,'0') + ':' + String(this.minute).padStart(2,'0'); }
+};
+
+/* ---------- 11. CUACA ---------- */
+const Weather = {
+  type: 'sunny', timer: 90, particles: [],
+  update(dt) {
+    this.timer -= dt;
+    if (this.timer <= 0) {
+      this.timer = 120 + Math.random() * 180;
+      const r = Math.random();
+      if (r < 0.6) this.type = 'sunny';
+      else if (r < 0.85) this.type = 'rain';
+      else this.type = 'windy';
+      this.initParticles();
+    }
+    for (let i = 0; i < this.particles.length; i++) {
+      const p = this.particles[i];
+      if (this.type === 'rain') {
+        p.y += p.spd * dt;
+        if (p.y > H) { p.y = -4; p.x = Math.random() * W; }
+      } else {
+        p.x += p.vx * dt;
+        p.y += p.vy * dt + Math.sin(game.time * 2 + p.ph) * 12 * dt;
+        if (p.x > W + 8) { p.x = -8; p.y = Math.random() * H; }
+      }
+    }
+  },
+  initParticles() {
+    this.particles = [];
+    if (this.type === 'rain') {
+      for (let i = 0; i < 50; i++) this.particles.push({ x: Math.random() * W, y: Math.random() * H, spd: 220 + Math.random() * 100 });
+    } else if (this.type === 'windy') {
+      for (let i = 0; i < 14; i++) this.particles.push({ x: Math.random() * W, y: Math.random() * H, vx: 40 + Math.random() * 40, vy: Math.random() * 8, ph: Math.random() * 6, color: Math.random() < 0.5 ? C.leaf1 : C.leaf3 });
+    }
+  },
+  render() {
+    if (this.type === 'rain') {
+      ctx.fillStyle = 'rgba(140,170,200,0.55)';
+      for (let i = 0; i < this.particles.length; i++) {
+        const p = this.particles[i];
+        ctx.fillRect(Math.round(p.x), Math.round(p.y), 1, 3);
+      }
+    } else if (this.type === 'windy') {
+      for (let i = 0; i < this.particles.length; i++) {
+        const p = this.particles[i];
+        ctx.fillStyle = p.color;
+        ctx.fillRect(Math.round(p.x), Math.round(p.y), 2, 1);
+      }
+    }
+  },
+  getTint() {
+    if (this.type === 'rain')  return { r: 100, g: 120, b: 150, a: 0.20 };
+    if (this.type === 'windy') return { r: 200, g: 220, b: 180, a: 0.05 };
+    return null;
+  }
+};
+
+/* ---------- 12. DATA NPC ---------- */
+const RABBIT_DOWN = ["................","...11......11...","...121....121...","...131....131...","...111....111...","..11222222211...",".122222222221...",".122422224221...",".122222222221...",".122233222221...",".122222222221...","..1222222221....","...11111111....."];
+const RABBIT_UP = ["................","...11......11...","...121....121...","...131....131...","...111....111...","..11222222211...",".122222222221...",".122222222221...",".122222222221...",".122222222221...",".122222222221...","..1222222221....","...11111111....."];
+const RABBIT_SIDE = ["................","...11....11.....","...121..121.....","...131..131.....","...111..111.....","...12222221.....","..1222222221....","..1222224221....","..1222222331....","..1222222221....","..1222222221....","...12222221.....","....1111111....."];
+const BEAR_DOWN = ["................","..11........11..","..121......121..","..111111111111..",".12222222222221.",".12242222422221.",".12222222222221.",".12332222332221.",".12222222222221.",".12222222222221.","..122222222221..","..122222222221..","...1111111111..."];
+const BEAR_UP = ["................","..11........11..","..121......121..","..111111111111..",".12222222222221.",".12222222222221.",".12222222222221.",".12222222222221.",".12222222222221.",".12222222222221.","..122222222221..","..122222222221..","...1111111111..."];
+const BEAR_SIDE = ["................","...11......11...","...121....121...","...1111111111...","..122222222221..","..122222224221..","..122222222221..","..122223332221..","..122222222221..","..122222222221..","...1222222221...","...1222222221...","....11111111...."];
+const CAT_DOWN = ["................","..1..........1..","..12........21..","..121......121..","..111111111111..",".12222222222221.",".12242222422221.",".12332222332221.",".12222222222221.",".12222222222221.","..122222222221..","..122222222221..","...1111111111..."];
+const CAT_UP = ["................","..1..........1..","..12........21..","..121......121..","..111111111111..",".12222222222221.",".12222222222221.",".12222222222221.",".12222222222221.",".12222222222221.","..122222222221..","..122222222221..","...1111111111..."];
+const CAT_SIDE = ["................","...1........1...","...12......21...","...121....121...","...1111111111...","..122222222221..","..122222242221..","..122222222221..","..122223332221..","..122222222221..","...1222222221...","...1222222221...","....11111111...."];
+const DUCK_DOWN = ["................","................","....11111111....","...1222222221...","..122222222221..","..124222224221..","..122222222221..","..122223332221..","..122222222221..","...1222222221...","..122222222221..","..122222222221..","...1111111111..."];
+const DUCK_UP = ["................","................","....11111111....","...1222222221...","..122222222221..","..122222222221..","..122222222221..","..122222222221..","..122222222221..","...1222222221...","..122222222221..","..122222222221..","...1111111111..."];
+const DUCK_SIDE = ["................","................","...1111111......","..122222221.....","..1222222221....","..1222242221....","..1222222221....","..1222222331....","..1222222221....","..1222222221....","...12222221.....","...12222221.....","...1111111......"];
+
+const NPC_DEFS = [
+  { id: 'lela', name: 'MPOK LELA', personality: 'cheerful',
+    palette: { '1': '#3a2a22', '2': '#f0e0c8', '3': '#f0a0b8', '4': '#3a2a22' },
+    legColors: { pants: '#f0a0b8', shoe: '#c07888', outline: '#3a2a22' },
+    bodies: { down: RABBIT_DOWN, up: RABBIT_UP, side: RABBIT_SIDE },
+    spawnX: 456, spawnY: 424,
+    greetings: { stranger: ['HALO! BUNGA DI SINI CANTIK YA~','KAMU ORANG BARU YA? SELAMAT DATANG!'], acquainted: ['EH, KAMU LAGI! MAU MAIN?'], friendly: ['KAMU TEMAN BAIKKU! AKU SENANG SEKALI~','BUNGA-BUNGA INI UNTUKMU, HEHE.'] } },
+  { id: 'bimo', name: 'PAK BIMO', personality: 'gruff',
+    palette: { '1': '#2e1e14', '2': '#a06840', '3': '#d8b088', '4': '#1a0e08' },
+    legColors: { pants: '#6b4429', shoe: '#4a2a18', outline: '#2e1e14' },
+    bodies: { down: BEAR_DOWN, up: BEAR_UP, side: BEAR_SIDE },
+    spawnX: 536, spawnY: 360,
+    greetings: { stranger: ['HMM? ADA APA, NAK?','AKU SEDANG MEMIKIRKAN SESUATU.'], acquainted: ['OH, KAMU. ADA YANG BISA AKU BANTU?'], friendly: ['KAMU ANAK BAIK. AKU SENANG KAMU DI SINI.'] } },
+  { id: 'nyo', name: 'NYO', personality: 'sleepy',
+    palette: { '1': '#2a1a10', '2': '#e08a4a', '3': '#f0d8a8', '4': '#2a1a10' },
+    legColors: { pants: '#8a6ab0', shoe: '#5a4070', outline: '#2a1a10' },
+    bodies: { down: CAT_DOWN, up: CAT_UP, side: CAT_SIDE },
+    spawnX: 424, spawnY: 408,
+    greetings: { stranger: ['NYAA... NGANTUK... ADA APA?','BIARKAN AKU TIDUR...'], acquainted: ['NYA~ KAMU DATANG LAGI...'], friendly: ['NYAA~ AKU SENANG KAMU DI SINI...','TEMANI AKU TIDUR SIANG, NYA~'] } },
+  { id: 'kwek', name: 'IBU KWEK', personality: 'motherly',
+    palette: { '1': '#3a2a22', '2': '#f0d868', '3': '#f09030', '4': '#3a2a22' },
+    legColors: { pants: '#6fa8d0', shoe: '#f09030', outline: '#3a2a22' },
+    bodies: { down: DUCK_DOWN, up: DUCK_UP, side: DUCK_SIDE },
+    spawnX: 520, spawnY: 424,
+    greetings: { stranger: ['EH, HALO SAYANG! SUDAH MAKAN?','HATI-HATI DI JALAN YA~'], acquainted: ['ADUH, KAMU KESINI LAGI! MAKAN DULU?'], friendly: ['KAMU SEPERTI ANAKKU SENDIRI~','KALAU BUTUH APA-APA, DATANG SAJA YA!'] } }
+];
+
+/* ---------- 13. ASSET BAKING ---------- */
+const assets = { grass: [], path: [], sand: null, water: [], tree: [], bush: null, rock: null, flower: [], house: null, player: null, sign: null, floor: [], wall: null };
+function bakeGrassTile(seed) {
+  const c = makeCanvas(TILE, TILE);
+  const g = c.getContext('2d');
+  g.fillStyle = C.grass1; g.fillRect(0, 0, TILE, TILE);
+  for (let y = 0; y < TILE; y++) for (let x = 0; x < TILE; x++) {
+    const n = hash2(x, y, seed);
+    if (n > 0.91) { g.fillStyle = C.grass3; g.fillRect(x, y, 1, 1); }
+    else if (n < 0.07) { g.fillStyle = C.grass2; g.fillRect(x, y, 1, 1); }
+  }
+  return c;
+}
+function bakePathTile(seed) {
+  const c = makeCanvas(TILE, TILE);
+  const g = c.getContext('2d');
+  g.fillStyle = C.path1; g.fillRect(0, 0, TILE, TILE);
+  for (let y = 0; y < TILE; y++) for (let x = 0; x < TILE; x++) {
+    const n = hash2(x, y, seed);
+    if (n > 0.90) { g.fillStyle = C.path3; g.fillRect(x, y, 1, 1); }
+    else if (n < 0.09) { g.fillStyle = C.path2; g.fillRect(x, y, 1, 1); }
+  }
+  g.fillStyle = C.path2; g.fillRect(3, 5, 2, 1); g.fillRect(11, 11, 2, 1);
+  return c;
+}
+function bakeSandTile() {
+  const c = makeCanvas(TILE, TILE);
+  const g = c.getContext('2d');
+  g.fillStyle = C.sand1; g.fillRect(0, 0, TILE, TILE);
+  for (let y = 0; y < TILE; y++) for (let x = 0; x < TILE; x++) {
+    if (hash2(x, y, 91) > 0.90) { g.fillStyle = C.sand2; g.fillRect(x, y, 1, 1); }
+  }
+  return c;
+}
+function bakeWaterTile(v, frame) {
+  const c = makeCanvas(TILE, TILE);
+  const g = c.getContext('2d');
+  g.fillStyle = C.water1; g.fillRect(0, 0, TILE, TILE);
+  const off = frame * 2 + v * 5;
+  for (let i = 0; i < 3; i++) {
+    const yy = ((i * 5 + off) % 16 + 16) % 16;
+    const xx = ((i * 6 + off * 2) % 16 + 16) % 16;
+    g.fillStyle = C.water2; g.fillRect(xx, yy, 5, 1);
+    g.fillStyle = C.water3; g.fillRect(xx + 1, yy, 3, 1);
+  }
+  g.fillStyle = C.water4;
+  g.fillRect((off * 3) % 16, (off * 5) % 16, 2, 1);
+  return c;
+}
+function bakeTree(v) {
+  const c = makeCanvas(32, 42);
+  const g = c.getContext('2d');
+  drawShadowEllipse(g, 16, 39, 11, 3, 'rgba(58,42,34,0.20)');
+  g.fillStyle = C.outline; g.fillRect(13, 21, 7, 19);
+  g.fillStyle = C.trunk1; g.fillRect(14, 22, 5, 18);
+  g.fillStyle = C.trunk2; g.fillRect(17, 22, 2, 18);
+  const cx = 16, cy = 16, r = 13;
+  fillCirclePixel(g, cx, cy, r + 1, C.outline);
+  fillCirclePixel(g, cx, cy, r, C.leaf4);
+  fillCirclePixel(g, cx - 3, cy - 2, r - 3, C.leaf1);
+  fillCirclePixel(g, cx - 2, cy - 4, r - 6, C.leaf2);
+  fillCirclePixel(g, cx - 1, cy - 5, r - 9, C.leaf3);
+  if (v === 1) { g.fillStyle = '#f2a2a2'; g.fillRect(9, 14, 2, 2); g.fillRect(19, 19, 2, 2); g.fillRect(14, 23, 2, 2); }
+  else if (v === 2) { g.fillStyle = C.leaf3; g.fillRect(10, 18, 2, 1); g.fillRect(20, 12, 2, 1); }
+  return c;
+}
+function bakeBush() {
+  const c = makeCanvas(16, 16);
+  const g = c.getContext('2d');
+  drawShadowEllipse(g, 8, 14, 6, 2, 'rgba(58,42,34,0.18)');
+  fillCirclePixel(g, 8, 9, 6, C.outline);
+  fillCirclePixel(g, 8, 9, 5, C.leaf4);
+  fillCirclePixel(g, 7, 8, 4, C.leaf1);
+  fillCirclePixel(g, 6, 7, 2, C.leaf2);
+  return c;
+}
+function bakeRock() {
+  const c = makeCanvas(16, 16);
+  const g = c.getContext('2d');
+  drawShadowEllipse(g, 8, 14, 6, 2, 'rgba(58,42,34,0.18)');
+  fillCirclePixel(g, 8, 10, 5, C.outline);
+  fillCirclePixel(g, 8, 10, 4, C.stone2);
+  fillCirclePixel(g, 7, 9, 3, C.stone1);
+  fillCirclePixel(g, 6, 8, 1, C.stone3);
+  return c;
+}
+function bakeFlower(color, frame) {
+  const c = makeCanvas(16, 16);
+  const g = c.getContext('2d');
+  const sw = frame;
+  g.fillStyle = C.leaf4; g.fillRect(7 + sw, 10, 1, 4);
+  g.fillStyle = C.leaf1; g.fillRect(5 + sw, 12, 2, 1); g.fillRect(9 + sw, 11, 2, 1);
+  g.fillStyle = color;
+  g.fillRect(7 + sw, 6, 3, 1); g.fillRect(6 + sw, 7, 5, 1); g.fillRect(7 + sw, 8, 3, 1);
+  g.fillStyle = '#ffe9a8'; g.fillRect(8 + sw, 7, 1, 1);
+  return c;
+}
+function bakeHouse() {
+  const c = makeCanvas(64, 56);
+  const g = c.getContext('2d');
+  drawShadowEllipse(g, 32, 52, 30, 4, 'rgba(58,42,34,0.20)');
+  g.fillStyle = C.outline; g.fillRect(4, 26, 56, 26);
+  g.fillStyle = C.wall1; g.fillRect(5, 27, 54, 24);
+  g.fillStyle = C.wall2; g.fillRect(5, 45, 54, 6);
+  g.fillStyle = C.wood2; g.fillRect(5, 27, 54, 1); g.fillRect(8, 27, 2, 24); g.fillRect(54, 27, 2, 24); g.fillRect(5, 44, 54, 1);
+  g.fillStyle = C.outline; g.fillRect(24, 32, 16, 20);
+  g.fillStyle = C.wood2; g.fillRect(25, 33, 14, 19);
+  g.fillStyle = C.wood1; g.fillRect(26, 34, 12, 18);
+  g.fillStyle = C.wood3; g.fillRect(30, 34, 1, 18);
+  g.fillStyle = C.uiGold; g.fillRect(36, 43, 2, 2);
+  for (const wx of [10, 44]) {
+    g.fillStyle = C.outline; g.fillRect(wx - 1, 32, 12, 10);
+    g.fillStyle = C.glass; g.fillRect(wx, 33, 10, 8);
+    g.fillStyle = C.glass2; g.fillRect(wx + 1, 34, 4, 3);
+    g.fillStyle = C.wood2; g.fillRect(wx + 4, 33, 1, 8); g.fillRect(wx, 36, 10, 1);
+  }
+  for (let y = 1; y <= 31; y++) {
+    const t = (y - 1) / 30;
+    const l = Math.round(12 - 14 * t) - 1;
+    const r = Math.round(52 + 14 * t) + 1;
+    g.fillStyle = C.outline; g.fillRect(l, y, r - l + 1, 1);
+  }
+  for (let y = 2; y <= 30; y++) {
+    const t = (y - 2) / 28;
+    const l = Math.round(13 - 14 * t);
+    const r = Math.round(51 + 14 * t);
+    g.fillStyle = ((y - 2) % 5 === 4) ? C.roof2 : C.roof1;
+    g.fillRect(l, y, r - l + 1, 1);
+  }
+  g.fillStyle = C.roof3;
+  for (let y = 4; y <= 12; y++) {
+    const t = (y - 2) / 28;
+    const l = Math.round(13 - 14 * t);
+    g.fillRect(l + 2, y, 5, 1);
+  }
+  return c;
+}
+function bakeSign() {
+  const c = makeCanvas(16, 22);
+  const g = c.getContext('2d');
+  drawShadowEllipse(g, 8, 21, 6, 1, 'rgba(58,42,34,0.20)');
+  g.fillStyle = C.outline; g.fillRect(3, 4, 10, 12);
+  g.fillStyle = C.wood1; g.fillRect(4, 5, 8, 10);
+  g.fillStyle = C.wood3; g.fillRect(5, 7, 6, 1); g.fillRect(5, 9, 4, 1); g.fillRect(5, 11, 5, 1);
+  g.fillStyle = C.outline; g.fillRect(7, 15, 2, 6);
+  g.fillStyle = C.wood2; g.fillRect(8, 15, 1, 6);
+  return c;
+}
+function bakeFloor(v) {
+  const c = makeCanvas(TILE, TILE);
+  const g = c.getContext('2d');
+  g.fillStyle = (v & 1) ? C.floor1 : C.floor2; g.fillRect(0, 0, TILE, TILE);
+  g.fillStyle = C.floorLine; g.fillRect(0, 0, TILE, 1); g.fillRect(0, 0, 1, TILE);
+  return c;
+}
+function bakeWall() {
+  const c = makeCanvas(TILE, TILE);
+  const g = c.getContext('2d');
+  g.fillStyle = C.wallTop; g.fillRect(0, 0, TILE, TILE);
+  g.fillStyle = C.wallBot; g.fillRect(0, 12, TILE, 4);
+  g.fillStyle = 'rgba(0,0,0,0.15)'; g.fillRect(0, 14, TILE, 1);
+  return c;
+}
+const LEG_FRAMES = [{ l: 0, r: 0 },{ l: -1, r: 1 },{ l: 0, r: 0 },{ l: 1, r: -1 }];
+function drawLegsStyled(g, frame, pants, shoe, outline) {
+  const L = LEG_FRAMES[frame].l, R = LEG_FRAMES[frame].r;
+  g.fillStyle = outline; g.fillRect(3, 13, 10, 1);
+  g.fillStyle = pants; g.fillRect(4, 13, 8, 1); g.fillRect(4, 14, 8, 1);
+  g.fillStyle = outline; g.fillRect(3, 14, 1, 1); g.fillRect(12, 14, 1, 1);
+  g.fillStyle = outline; g.fillRect(3 + L, 15, 1, 1);
+  g.fillStyle = shoe; g.fillRect(4 + L, 15, 3, 1);
+  g.fillStyle = outline; g.fillRect(7 + L, 15, 1, 1);
+  g.fillStyle = outline; g.fillRect(8 + R, 15, 1, 1);
+  g.fillStyle = shoe; g.fillRect(9 + R, 15, 3, 1);
+  g.fillStyle = outline; g.fillRect(12 + R, 15, 1, 1);
+}
+function bakeCharacterFrame(bodyRows, frame, flip, palette, legColors) {
+  const c = makeCanvas(16, 16);
+  const g = c.getContext('2d');
+  for (let r = 0; r < bodyRows.length; r++) {
+    const row = bodyRows[r];
+    for (let i = 0; i < row.length; i++) {
+      const col = palette[row[i]];
+      if (col) { g.fillStyle = col; g.fillRect(i, r, 1, 1); }
+    }
+  }
+  drawLegsStyled(g, frame, legColors.pants, legColors.shoe, legColors.outline);
+  if (!flip) return c;
+  const f = makeCanvas(16, 16);
+  const fg = f.getContext('2d');
+  fg.imageSmoothingEnabled = false;
+  fg.translate(16, 0); fg.scale(-1, 1);
+  fg.drawImage(c, 0, 0);
+  return f;
+}
+function bakeSpriteSet(bodies, palette, legColors, sideIsLeft) {
+  const out = { down: [], up: [], left: [], right: [] };
+  for (let f = 0; f < 4; f++) {
+    out.down.push(bakeCharacterFrame(bodies.down, f, false, palette, legColors));
+    out.up.push(bakeCharacterFrame(bodies.up, f, false, palette, legColors));
+    if (sideIsLeft) {
+      out.left.push(bakeCharacterFrame(bodies.side, f, false, palette, legColors));
+      out.right.push(bakeCharacterFrame(bodies.side, f, true, palette, legColors));
+    } else {
+      out.right.push(bakeCharacterFrame(bodies.side, f, false, palette, legColors));
+      out.left.push(bakeCharacterFrame(bodies.side, f, true, palette, legColors));
+    }
+  }
+  return out;
+}
+const PLAYER_PAL = { '1': C.outline, '2': C.skin, '4': C.hair, '5': C.shirt, '6': C.shirtS, '7': C.pants, '9': C.shoe };
+const PLAYER_BODY = {
+  down: ["................","...1111111111...","..144444444441..","..144444444441..","..142222222241..","..142122221241..","..142222222241..","...1111111111...","...1555555551...","..125555555521..","..125555555521..","..125555555521..","...1555555551..."],
+  up: ["................","...1111111111...","..144444444441..","..144444444441..","..144444444441..","..144444444441..","..144444444441..","...1111111111...","...1555555551...","..125555555521..","..125555555521..","..125555555521..","...1555555551..."],
+  side: ["................","....111111111...","...14444444441..","...14444444441..","...12224444441..","...12124444441..","...12224444441..","....111111111...","...1555555551...","..125555555521..","..125555555521..","..125555555521..","...1555555551..."]
+};
+let playerShadow = null;
+function bakePlayerShadow() {
+  const c = makeCanvas(16, 8);
+  const g = c.getContext('2d');
+  drawShadowEllipse(g, 8, 4, 6, 3, 'rgba(58,42,34,0.26)');
+  playerShadow = c;
+}
+const bugSprites = {};
+function bakeBugSprites() {
+  for (const f of [0, 1]) {
+    const c = makeCanvas(12, 12);
+    const g = c.getContext('2d');
+    const spread = f ? 2 : 3;
+    g.fillStyle = '#f0a0d0'; g.fillRect(4 - spread, 3, spread, 4); g.fillRect(8, 3, spread, 4);
+    g.fillStyle = '#f0e0a0'; g.fillRect(5 - spread, 7, spread - 1, 2); g.fillRect(8, 7, spread - 1, 2);
+    g.fillStyle = '#3a2a22'; g.fillRect(5, 3, 2, 7); g.fillRect(5, 2, 2, 1);
+    bugSprites['kupu_' + f] = c;
+  }
+  for (const f of [0, 1]) {
+    const c = makeCanvas(12, 12);
+    const g = c.getContext('2d');
+    g.fillStyle = '#4060a0'; g.fillRect(4, 4, 4, 5);
+    g.fillStyle = '#90b0e0'; g.fillRect(5, 5, 2, 3);
+    g.fillStyle = '#3a2a22'; g.fillRect(3, 4, 6, 1); g.fillRect(4, 3, 1, 1); g.fillRect(7, 3, 1, 1);
+    if (f) { g.fillRect(3, 2, 1, 1); g.fillRect(8, 2, 1, 1); } else { g.fillRect(4, 2, 1, 1); g.fillRect(7, 2, 1, 1); }
+    bugSprites['kumbang_' + f] = c;
+  }
+  for (const f of [0, 1]) {
+    const c = makeCanvas(12, 12);
+    const g = c.getContext('2d');
+    g.fillStyle = '#90c060'; g.fillRect(3, f ? 4 : 5, 7, 3);
+    g.fillStyle = '#c0e090'; g.fillRect(4, f ? 5 : 6, 5, 1);
+    g.fillStyle = '#3a2a22'; g.fillRect(2, f ? 4 : 5, 1, 1); g.fillRect(8, f ? 2 : 3, 1, 3); g.fillRect(6, f ? 7 : 8, 1, 2); g.fillRect(4, f ? 7 : 8, 1, 2);
+    bugSprites['belalang_' + f] = c;
+  }
+}
+function bakeAllAssets() {
+  assets.grass = [bakeGrassTile(3), bakeGrassTile(17), bakeGrassTile(29)];
+  assets.path = [bakePathTile(41), bakePathTile(53)];
+  assets.sand = bakeSandTile();
+  assets.water = [];
+  for (let v = 0; v < 3; v++) { const frames = []; for (let f = 0; f < 3; f++) frames.push(bakeWaterTile(v, f)); assets.water.push(frames); }
+  assets.tree = [bakeTree(0), bakeTree(1), bakeTree(2)];
+  assets.bush = bakeBush(); assets.rock = bakeRock();
+  const flowerColors = ['#f2a2c0', '#f7d774', '#c8a8f0', '#f7a08a', '#ffffff'];
+  assets.flower = flowerColors.map(col => [bakeFlower(col, 0), bakeFlower(col, 1)]);
+  assets.house = bakeHouse(); assets.sign = bakeSign();
+  assets.floor = [bakeFloor(0), bakeFloor(1)]; assets.wall = bakeWall();
+  assets.player = bakeSpriteSet(PLAYER_BODY, PLAYER_PAL, { pants: C.pants, shoe: C.shoe, outline: C.outline }, true);
+  bakePlayerShadow(); bakeItemIcons(); bakeBugSprites();
+}
+
+/* ---------- 14. PETA ---------- */
+const ground = new Uint8Array(MAP_W * MAP_H);
+const solid = new Uint8Array(MAP_W * MAP_H);
+const occupied = new Uint8Array(MAP_W * MAP_H);
+const waterVariant = new Uint8Array(MAP_W * MAP_H);
+let objects = [];
+let flowers = [];
+let worldGround = null;
+let shopSign = null;
+
+function setTile(tx, ty, type) { if (tx < 0 || ty < 0 || tx >= MAP_W || ty >= MAP_H) return; ground[ty * MAP_W + tx] = type; }
+function getTile(tx, ty) { if (tx < 0 || ty < 0 || tx >= MAP_W || ty >= MAP_H) return -1; return ground[ty * MAP_W + tx]; }
+function canPlace(tx, ty) { if (tx < 0 || ty < 0 || tx >= MAP_W || ty >= MAP_H) return false; const i = ty * MAP_W + tx; if (ground[i] !== T.GRASS) return false; if (occupied[i]) return false; return true; }
+function addObject(img, tx, ty, collW, collH, collOffY) {
+  const x = tx * TILE + 8 - (img.width >> 1);
+  const y = ty * TILE + TILE - img.height;
+  const sortY = ty * TILE + TILE;
+  let coll = null;
+  if (collW > 0) coll = { x: tx * TILE + 8 - (collW >> 1), y: ty * TILE + TILE - collOffY - collH, w: collW, h: collH };
+  const o = { x, y, img, sortY, coll, type: 'prop' };
+  objects.push(o); return o;
+}
+function addTree(tx, ty, variant) {
+  if (!canPlace(tx, ty)) return;
+  occupied[ty * MAP_W + tx] = 1; solid[ty * MAP_W + tx] = 1;
+  const o = addObject(assets.tree[variant % assets.tree.length], tx, ty, 10, 12, 4);
+  o.type = 'tree'; o.hp = 3; o.tileX = tx; o.tileY = ty; o.variant = variant;
+}
+function addBush(tx, ty) { if (!canPlace(tx, ty)) return; occupied[ty * MAP_W + tx] = 1; solid[ty * MAP_W + tx] = 1; addObject(assets.bush, tx, ty, 12, 10, 3); }
+function addRock(tx, ty) { if (!canPlace(tx, ty)) return; occupied[ty * MAP_W + tx] = 1; solid[ty * MAP_W + tx] = 1; addObject(assets.rock, tx, ty, 12, 10, 3); }
+function addFlower(tx, ty, v) {
+  if (!canPlace(tx, ty)) return;
+  occupied[ty * MAP_W + tx] = 1;
+  flowers.push({ x: tx * TILE, y: ty * TILE, img: assets.flower[v % assets.flower.length], phase: hash2(tx, ty, 5) * 2 });
+}
+function generateWorld() {
+  const rng = mulberry32(20240607);
+  for (let i = 0; i < MAP_W * MAP_H; i++) ground[i] = T.GRASS;
+  solid.fill(0); occupied.fill(0); waterVariant.fill(0);
+  for (let tx = 3; tx <= 60; tx++) { setTile(tx, 24, T.PATH); setTile(tx, 25, T.PATH); }
+  for (let ty = 3; ty <= 45; ty++) { setTile(30, ty, T.PATH); setTile(31, ty, T.PATH); }
+  for (let ty = 21; ty <= 27; ty++) for (let tx = 27; tx <= 34; tx++) setTile(tx, ty, T.PATH);
+  for (let ty = 0; ty < MAP_H; ty++) for (let tx = 0; tx < MAP_W; tx++) {
+    const dx = (tx - 47) / 10.5, dy = (ty - 11) / 6.5;
+    const d = dx * dx + dy * dy;
+    if (d <= 1) { setTile(tx, ty, T.WATER); waterVariant[ty * MAP_W + tx] = (hash2(tx, ty, 13) * 3) | 0; }
+    else if (d <= 1.45 && getTile(tx, ty) === T.GRASS) setTile(tx, ty, T.SAND);
+  }
+  for (let ty = 0; ty < MAP_H; ty++) for (let tx = 0; tx < MAP_W; tx++) {
+    const i = ty * MAP_W + tx;
+    if (ground[i] === T.WATER) solid[i] = 1;
+    if (tx === 0 || ty === 0 || tx === MAP_W - 1 || ty === MAP_H - 1) solid[i] = 1;
+  }
+  const HOUSE_TX = 27, HOUSE_TY = 20;
+  const hx = HOUSE_TX * TILE + 8 - (assets.house.width >> 1);
+  const hy = HOUSE_TY * TILE + TILE - assets.house.height;
+  objects.push({ x: hx, y: hy, img: assets.house, sortY: HOUSE_TY * TILE + TILE, coll: { x: hx + 2, y: hy + 30, w: 60, h: 26 }, type: 'house', doorX: hx + 32, doorY: hy + 44 });
+  for (let ty = 18; ty <= 20; ty++) for (let tx = 25; tx <= 29; tx++) {
+    if (tx >= 0 && tx < MAP_W && ty >= 0 && ty < MAP_H) { occupied[ty * MAP_W + tx] = 1; solid[ty * MAP_W + tx] = 1; }
+  }
+  const signX = 34 * TILE + 8, signY = 22 * TILE + TILE;
+  shopSign = { x: signX - 8, y: signY - 22, img: assets.sign, sortY: signY, coll: { x: signX - 5, y: signY - 6, w: 10, h: 6 }, type: 'shop', cx: signX, cy: signY };
+  objects.push(shopSign);
+  for (let tx = 0; tx < MAP_W; tx++) for (const ty of [0, 1, MAP_H - 2, MAP_H - 1]) if (rng() < 0.72) addTree(tx, ty, (rng() * 3) | 0);
+  for (let ty = 0; ty < MAP_H; ty++) for (const tx of [0, 1, MAP_W - 2, MAP_W - 1]) if (rng() < 0.72) addTree(tx, ty, (rng() * 3) | 0);
+  for (let n = 0; n < 90; n++) { const tx = 2 + ((rng() * (MAP_W - 4)) | 0); const ty = 2 + ((rng() * (MAP_H - 4)) | 0); if (canPlace(tx, ty) && rng() < 0.55) addTree(tx, ty, (rng() * 3) | 0); }
+  for (let n = 0; n < 70; n++) { const tx = 2 + ((rng() * (MAP_W - 4)) | 0); const ty = 2 + ((rng() * (MAP_H - 4)) | 0); if (canPlace(tx, ty)) { if (rng() < 0.6) addBush(tx, ty); else addRock(tx, ty); } }
+  for (let ty = 2; ty < MAP_H - 2; ty++) for (let tx = 2; tx < MAP_W - 2; tx++) { if (getTile(tx, ty) !== T.GRASS) continue; if (rng() < 0.055) addFlower(tx, ty, (rng() * 5) | 0); }
+  clearSpawnArea(27, 21, 5, 4);
+}
+function clearSpawnArea(tx, ty, w, h) {
+  for (let y = ty; y < ty + h; y++) for (let x = tx; x < tx + w; x++) { if (x < 0 || y < 0 || x >= MAP_W || y >= MAP_H) continue; solid[y * MAP_W + x] = 0; occupied[y * MAP_W + x] = 1; }
+  const bx = tx * TILE, by = ty * TILE, bw = w * TILE, bh = h * TILE;
+  objects = objects.filter(o => {
+    if (!o.coll || o.type === 'house' || o.type === 'shop') return true;
+    return !(o.coll.x < bx + bw && o.coll.x + o.coll.w > bx && o.coll.y < by + bh && o.coll.y + o.coll.h > by);
+  });
+}
+function bakeWorldCanvas() {
+  const wc = makeCanvas(WORLD_W, WORLD_H);
+  const g = wc.getContext('2d');
+  g.imageSmoothingEnabled = false;
+  for (let ty = 0; ty < MAP_H; ty++) for (let tx = 0; tx < MAP_W; tx++) {
+    const t = ground[ty * MAP_W + tx];
+    let img;
+    if (t === T.GRASS) img = assets.grass[(hash2(tx, ty, 7) * 3) | 0];
+    else if (t === T.PATH) img = assets.path[(hash2(tx, ty, 11) * 2) | 0];
+    else if (t === T.SAND) img = assets.sand;
+    else img = assets.water[waterVariant[ty * MAP_W + tx]][0];
+    g.drawImage(img, tx * TILE, ty * TILE);
+  }
+  return wc;
+}
+
+/* ---------- 15. INTERIOR ---------- */
+const IN_W = 10, IN_H = 7;
+const interior = { active: false, ground: new Uint8Array(IN_W * IN_H), solid: new Uint8Array(IN_W * IN_H), floorVariants: new Uint8Array(IN_W * IN_H), objects: [], canvas: null, doorTX: 4, entryTX: 4, entryTY: 5 };
+function generateInterior() {
+  for (let ty = 0; ty < IN_H; ty++) for (let tx = 0; tx < IN_W; tx++) {
+    const i = ty * IN_W + tx;
+    const isEdge = (tx === 0 || ty === 0 || tx === IN_W - 1 || ty === IN_H - 1);
+    const isDoor = (ty === IN_H - 1 && (tx === 4 || tx === 5));
+    if (isDoor) { interior.ground[i] = T.DOOR; interior.solid[i] = 0; }
+    else if (isEdge) { interior.ground[i] = T.WALL; interior.solid[i] = 1; }
+    else { interior.ground[i] = T.FLOOR; interior.solid[i] = 0; }
+    interior.floorVariants[i] = (tx + ty) & 1;
+  }
+  interior.objects = [{ tx: 2, ty: 2, kind: 'bed' },{ tx: 6, ty: 2, kind: 'table' },{ tx: 6, ty: 3, kind: 'chair' },{ tx: 8, ty: 5, kind: 'plant' }];
+  const c = makeCanvas(IN_W * TILE, IN_H * TILE);
+  const g = c.getContext('2d');
+  g.imageSmoothingEnabled = false;
+  for (let ty = 0; ty < IN_H; ty++) for (let tx = 0; tx < IN_W; tx++) {
+    const t = interior.ground[ty * IN_W + tx];
+    if (t === T.FLOOR) g.drawImage(assets.floor[interior.floorVariants[ty * IN_W + tx]], tx * TILE, ty * TILE);
+    else if (t === T.WALL) g.drawImage(assets.wall, tx * TILE, ty * TILE);
+    else if (t === T.DOOR) {
+      g.fillStyle = C.wood2; g.fillRect(tx * TILE, ty * TILE, TILE, TILE);
+      g.fillStyle = C.wood1; g.fillRect(tx * TILE + 1, ty * TILE + 1, TILE - 2, TILE - 1);
+      g.fillStyle = C.uiGold; g.fillRect(tx * TILE + 7, ty * TILE + 8, 2, 2);
+    }
+  }
+  for (const f of interior.objects) {
+    const fx = f.tx * TILE, fy = f.ty * TILE;
+    if (f.kind === 'bed') {
+      g.fillStyle = C.outline; g.fillRect(fx, fy + 4, 32, 14);
+      g.fillStyle = '#e07090'; g.fillRect(fx + 1, fy + 5, 30, 12);
+      g.fillStyle = '#f7efdf'; g.fillRect(fx + 2, fy + 6, 10, 10);
+      g.fillStyle = '#c05070'; g.fillRect(fx + 13, fy + 5, 18, 3);
+    } else if (f.kind === 'table') {
+      g.fillStyle = C.outline; g.fillRect(fx, fy + 6, 16, 8);
+      g.fillStyle = C.wood1; g.fillRect(fx + 1, fy + 7, 14, 6);
+      g.fillStyle = C.wood3; g.fillRect(fx + 3, fy + 2, 4, 5);
+      g.fillStyle = '#f0c060'; g.fillRect(fx + 4, fy + 3, 2, 3);
+    } else if (f.kind === 'chair') {
+      g.fillStyle = C.outline; g.fillRect(fx + 2, fy + 4, 12, 8);
+      g.fillStyle = C.wood2; g.fillRect(fx + 3, fy + 5, 10, 6);
+      g.fillStyle = C.wood3; g.fillRect(fx + 3, fy + 5, 10, 1);
+    } else if (f.kind === 'plant') {
+      g.fillStyle = C.outline; g.fillRect(fx + 5, fy + 8, 6, 6);
+      g.fillStyle = C.wood3; g.fillRect(fx + 6, fy + 9, 4, 5);
+      fillCirclePixel(g, fx + 8, fy + 6, 4, C.outline);
+      fillCirclePixel(g, fx + 8, fy + 6, 3, C.leaf1);
+      fillCirclePixel(g, fx + 7, fy + 5, 2, C.leaf2);
+    }
+    if (f.kind === 'bed' || f.kind === 'table') {
+      for (let dy = 0; dy < 2; dy++) for (let dx = 0; dx < 2; dx++) {
+        const sx = f.tx + dx, sy = f.ty + dy;
+        if (sx < IN_W && sy < IN_H) interior.solid[sy * IN_W + sx] = 1;
+      }
+    }
+  }
+  interior.canvas = c;
+}
+
+/* ---------- 16. COLLISION & PEMAIN ---------- */
+function entityCollides(px, py, hw, hh, inInterior) {
+  const bx = px - hw, by = py - hh, bw = hw * 2, bh = hh;
+  if (inInterior) {
+    const tx0 = Math.floor(bx / TILE), tx1 = Math.floor((bx + bw - 1) / TILE);
+    const ty0 = Math.floor(by / TILE), ty1 = Math.floor((by + bh - 1) / TILE);
+    for (let ty = ty0; ty <= ty1; ty++) for (let tx = tx0; tx <= tx1; tx++) {
+      if (tx < 0 || ty < 0 || tx >= IN_W || ty >= IN_H) return true;
+      if (interior.solid[ty * IN_W + tx]) return true;
+    }
+    return false;
+  }
+  const tx0 = Math.floor(bx / TILE), tx1 = Math.floor((bx + bw - 1) / TILE);
+  const ty0 = Math.floor(by / TILE), ty1 = Math.floor((by + bh - 1) / TILE);
+  for (let ty = ty0; ty <= ty1; ty++) for (let tx = tx0; tx <= tx1; tx++) {
+    if (tx < 0 || ty < 0 || tx >= MAP_W || ty >= MAP_H) return true;
+    if (solid[ty * MAP_W + tx]) return true;
+  }
+  for (let i = 0; i < objects.length; i++) {
+    const c = objects[i].coll;
+    if (!c) continue;
+    if (bx < c.x + c.w && bx + bw > c.x && by < c.y + c.h && by + bh > c.y) return true;
+  }
+  return false;
+}
+function tryMoveEntity(ent, dx, dy, hw, hh, inInterior) {
+  if (dx !== 0) { const nx = ent.x + dx; if (!entityCollides(nx, ent.y, hw, hh, inInterior)) ent.x = nx; }
+  if (dy !== 0) { const ny = ent.y + dy; if (!entityCollides(ent.x, ny, hw, hh, inInterior)) ent.y = ny; }
+}
+const player = { x: 440, y: 372, dir: 'down', frame: 0, animT: 0, moving: false, hw: 5, hh: 6, scene: 'world', stepPhase: 0 };
+const footParticles = [];
+function updatePlayer(dt) {
+  if (fishing.state !== 'idle') { player.moving = false; player.frame = 0; return; }
+  const a = getAxis();
+  if (a.x === 0 && a.y === 0) { player.moving = false; player.animT = 0; player.frame = 0; return; }
+  player.moving = true;
+  let dx = a.x, dy = a.y;
+  if (dx !== 0 && dy !== 0) { dx *= 0.70710678; dy *= 0.70710678; }
+  const step = SPEED * dt;
+  tryMoveEntity(player, dx * step, dy * step, player.hw, player.hh, player.scene === 'interior');
+  if (a.x !== 0) player.dir = a.x > 0 ? 'right' : 'left';
+  else player.dir = a.y > 0 ? 'down' : 'up';
+  player.animT += dt;
+  player.frame = Math.floor(player.animT * 8) % 4;
+  // Footstep particles (dust)
+  player.stepPhase += dt;
+  if (player.stepPhase > 0.22) {
+    player.stepPhase = 0;
+    if (player.scene === 'world' && footParticles.length < 20) {
+      footParticles.push({ x: player.x, y: player.y, life: 0.4 });
+    }
+  }
+}
+function updateFootParticles(dt) {
+  for (let i = footParticles.length - 1; i >= 0; i--) {
+    footParticles[i].life -= dt;
+    if (footParticles[i].life <= 0) footParticles.splice(i, 1);
+  }
+}
+
+/* ---------- 17. NPC ---------- */
+const npcs = [];
+function createNPC(def) {
+  return {
+    id: def.id, name: def.name, personality: def.personality,
+    x: def.spawnX, y: def.spawnY, homeX: def.spawnX, homeY: def.spawnY,
+    dir: 'down', frame: 0, animT: 0, moving: false,
+    state: 'idle', stateTimer: 1 + Math.random() * 2,
+    hw: 5, hh: 6, affinity: 0,
+    sprites: bakeSpriteSet(def.bodies, def.palette, def.legColors, false),
+    greetings: def.greetings,
+    renderObj: { x: 0, y: 0, img: null, sortY: 0, isNPC: true },
+    getGreeting() {
+      const tier = this.affinity >= 3 ? 'friendly' : (this.affinity >= 1 ? 'acquainted' : 'stranger');
+      const pool = this.greetings[tier];
+      return pool[Math.floor(Math.random() * pool.length)];
+    }
+  };
+}
+function faceToward(a, targetX, targetY) {
+  const dx = targetX - a.x, dy = targetY - a.y;
+  if (Math.abs(dx) > Math.abs(dy)) a.dir = dx > 0 ? 'right' : 'left';
+  else a.dir = dy > 0 ? 'down' : 'up';
+}
+function updateNPCs(dt) {
+  for (let i = 0; i < npcs.length; i++) {
+    const npc = npcs[i];
+    if (npc === dialog.npc && dialog.active) continue;
+    npc.stateTimer -= dt;
+    if (npc.state === 'idle') {
+      if (npc.stateTimer <= 0) {
+        const r = Math.random();
+        if (r < 0.55) { npc.state = 'walk'; npc.stateTimer = 1.5 + Math.random() * 2.5; const dirs = ['down', 'up', 'left', 'right']; npc.dir = dirs[Math.floor(Math.random() * 4)]; }
+        else { npc.stateTimer = 1.5 + Math.random() * 2.5; faceToward(npc, npc.homeX, npc.homeY); }
+      }
+      npc.frame = 0;
+    } else if (npc.state === 'walk') {
+      const ddx = npc.x - npc.homeX, ddy = npc.y - npc.homeY;
+      const distHome = Math.sqrt(ddx * ddx + ddy * ddy);
+      let dx = 0, dy = 0;
+      if (distHome > 70) { dx = Math.sign(-ddx); dy = Math.sign(-ddy); if (dx !== 0 && dy !== 0) { dx *= 0.70710678; dy *= 0.70710678; } faceToward(npc, npc.homeX, npc.homeY); }
+      else { if (npc.dir === 'down') dy = 1; else if (npc.dir === 'up') dy = -1; else if (npc.dir === 'left') dx = -1; else if (npc.dir === 'right') dx = 1; }
+      const step = NPC_SPEED * dt;
+      const ox = npc.x, oy = npc.y;
+      tryMoveEntity(npc, dx * step, dy * step, npc.hw, npc.hh, false);
+      if (Math.abs(npc.x - ox) < 0.01 && Math.abs(npc.y - oy) < 0.01) npc.stateTimer = 0;
+      npc.animT += dt;
+      npc.frame = Math.floor(npc.animT * 6) % 4;
+      if (npc.stateTimer <= 0) { npc.state = 'idle'; npc.stateTimer = 1 + Math.random() * 3; npc.frame = 0; }
+    }
+  }
+}
+
+/* ---------- 18. DIALOG ---------- */
+const dialog = { active: false, npc: null, lines: [], currentLine: 0, fullText: '', text: '', charTimer: 0, typewriterDone: false };
+function startDialog(npc) {
+  dialog.active = true; dialog.npc = npc;
+  dialog.lines = [npc.getGreeting()]; dialog.currentLine = 0;
+  dialog.fullText = dialog.lines[0]; dialog.text = ''; dialog.charTimer = 0; dialog.typewriterDone = false;
+  faceToward(npc, player.x, player.y); faceToward(player, npc.x, npc.y);
+  AudioSys.playSfx('dialog');
+}
+function advanceDialog() {
+  if (!dialog.active) return;
+  if (!dialog.typewriterDone) { dialog.text = dialog.fullText; dialog.typewriterDone = true; return; }
+  dialog.currentLine++;
+  if (dialog.currentLine >= dialog.lines.length) { closeDialog(); return; }
+  dialog.fullText = dialog.lines[dialog.currentLine];
+  dialog.text = ''; dialog.charTimer = 0; dialog.typewriterDone = false;
+  AudioSys.playSfx('dialog');
+}
+function closeDialog() { dialog.active = false; dialog.npc = null; dialog.lines = []; }
+function updateDialog(dt) {
+  if (!dialog.active || dialog.typewriterDone) return;
+  dialog.charTimer += dt;
+  const target = Math.floor(dialog.charTimer * 45);
+  if (target >= dialog.fullText.length) { dialog.text = dialog.fullText; dialog.typewriterDone = true; }
+  else dialog.text = dialog.fullText.substring(0, target);
+}
+function isLastLine() { return dialog.currentLine >= dialog.lines.length - 1; }
+function npcReact(npc, itemId) {
+  const item = ITEMS[itemId];
+  if (!item) return 'HMM?';
+  const value = item.giftValue || 1;
+  const score = value + npc.affinity;
+  if (npc.personality === 'cheerful') {
+    if (score >= 5) return 'WAAAH! AKU SUKA SEKALI! MAKASIH YA~';
+    if (score >= 3) return 'OH, TERIMA KASIH! AKU SUKA INI.';
+    return 'HEHE, MAKASIH YA!';
+  } else if (npc.personality === 'gruff') {
+    if (score >= 5) return 'HMM... INI BAGUS. TERIMA KASIH, NAK.';
+    if (score >= 3) return 'OH... TERIMA KASIH.';
+    return 'TERIMA KASIH YA.';
+  } else if (npc.personality === 'sleepy') {
+    if (score >= 5) return 'NYAA~ AKU SUKA... MAKASIH...';
+    if (score >= 3) return 'NYA... MAKASIH...';
+    return 'NYA~ MAKASIH...';
+  }
+  if (score >= 5) return 'ADUH, KAMU MANIS! MAKASIH YA SAYANG~';
+  if (score >= 3) return 'IH, MAKASIH YA!';
+  return 'MAKASIH YA, SAYANG.';
+}
+function giveGift(itemSlotIdx) {
+  const slot = inventory.slots[itemSlotIdx];
+  if (!slot) return false;
+  const item = ITEMS[slot.id];
+  if (item.isTool) { message.show('TIDAK BISA MEMBERI ALAT', 1.5); AudioSys.playSfx('error'); return false; }
+  const npc = dialog.npc;
+  if (!npc) return false;
+  const reaction = npcReact(npc, slot.id);
+  inventory.removeAt(itemSlotIdx, 1);
+  npc.affinity = Math.min(10, npc.affinity + 1);
+  dialog.lines = [reaction]; dialog.currentLine = 0;
+  dialog.fullText = reaction; dialog.text = ''; dialog.charTimer = 0; dialog.typewriterDone = false;
+  invUI.open = false; invUI.mode = 'normal';
+  AudioSys.playSfx('gift');
+  return true;
+}
+
+/* ---------- 19. MEMANCING ---------- */
+const FISH_TABLE = [
+  { id: 'ikan_kecil',  weight: 45, hourMin: 0, hourMax: 24 },
+  { id: 'ikan_sedang', weight: 30, hourMin: 6, hourMax: 22 },
+  { id: 'ikan_besar',  weight: 10, hourMin: 10, hourMax: 18 },
+  { id: 'udang',       weight: 15, hourMin: 18, hourMax: 6 }
+];
+function pickFish() {
+  const h = TimeSys.hour;
+  let total = 0;
+  const avail = [];
+  for (const f of FISH_TABLE) {
+    const ok = (f.hourMin < f.hourMax) ? (h >= f.hourMin && h < f.hourMax) : (h >= f.hourMin || h < f.hourMax);
+    if (ok) { avail.push(f); total += f.weight; }
+  }
+  if (avail.length === 0) return 'ikan_kecil';
+  let r = Math.random() * total;
+  for (const f of avail) { r -= f.weight; if (r <= 0) return f.id; }
+  return avail[avail.length - 1].id;
+}
+function findFishingSpot() {
+  let tx = Math.floor(player.x / TILE), ty = Math.floor(player.y / TILE);
+  let dtx = 0, dty = 0;
+  if (player.dir === 'down') dty = 1; else if (player.dir === 'up') dty = -1; else if (player.dir === 'left') dtx = -1; else dtx = 1;
+  for (let r = 1; r <= 2; r++) {
+    const wx = tx + dtx * r, wy = ty + dty * r;
+    if (getTile(wx, wy) === T.WATER) return { x: wx * TILE + 8, y: wy * TILE + 8 };
+  }
+  return null;
+}
+const fishing = { state: 'idle', timer: 0, castX: 0, castY: 0, cursor: 0, cursorDir: 1, speed: 220, result: '', hasUmpan: false };
+function startFishing() {
+  const spot = findFishingSpot();
+  if (!spot) { message.show('HADAP AIR UNTUK MEMANCING', 1.5); AudioSys.playSfx('error'); return; }
+  fishing.state = 'casting'; fishing.timer = 0.4;
+  fishing.castX = spot.x; fishing.castY = spot.y; fishing.hasUmpan = false;
+  for (let i = 0; i < inventory.slots.length; i++) {
+    if (inventory.slots[i] && inventory.slots[i].id === 'umpan') { inventory.removeAt(i, 1); fishing.hasUmpan = true; break; }
+  }
+  AudioSys.playSfx('cast');
+}
+function updateFishing(dt) {
+  if (fishing.state === 'idle') return;
+  fishing.timer -= dt;
+  if (fishing.state === 'casting') {
+    if (fishing.timer <= 0) { fishing.state = 'waiting'; fishing.timer = fishing.hasUmpan ? (0.6 + Math.random() * 1.2) : (1.5 + Math.random() * 2.5); }
+  } else if (fishing.state === 'waiting') {
+    if (fishing.timer <= 0) { fishing.state = 'bite'; fishing.timer = 1.2; AudioSys.playSfx('bite'); }
+  } else if (fishing.state === 'bite') {
+    if (fishing.timer <= 0) { fishing.state = 'idle'; message.show('IKAN KABUR...', 1.5); }
+  } else if (fishing.state === 'minigame') {
+    fishing.cursor += fishing.cursorDir * fishing.speed * dt;
+    if (fishing.cursor > 100) { fishing.cursor = 100; fishing.cursorDir = -1; }
+    if (fishing.cursor < 0) { fishing.cursor = 0; fishing.cursorDir = 1; }
+  } else if (fishing.state === 'result') {
+    if (fishing.timer <= 0) fishing.state = 'idle';
+  }
+}
+function fishingPress() {
+  if (fishing.state === 'bite') {
+    fishing.state = 'minigame'; fishing.cursor = 0; fishing.cursorDir = 1; fishing.speed = 200 + Math.random() * 80;
+  } else if (fishing.state === 'minigame') {
+    const inZone = fishing.cursor >= 35 && fishing.cursor <= 65;
+    if (inZone) {
+      const fishId = pickFish();
+      inventory.add(fishId, 1);
+      fishing.result = 'DAPAT ' + ITEMS[fishId].name + '!';
+      CollectionSys.markCaught(fishId);
+      AudioSys.playSfx('catch');
+    } else { fishing.result = 'IKAN LEPAS...'; AudioSys.playSfx('miss'); }
+    fishing.state = 'result'; fishing.timer = 1.6;
+  }
+}
+
+/* ---------- 20. SERANGGA ---------- */
+const BUG_TABLE = [
+  { id: 'kupu',     weight: 50, hourMin: 6, hourMax: 18 },
+  { id: 'kumbang',  weight: 25, hourMin: 18, hourMax: 6 },
+  { id: 'belalang', weight: 25, hourMin: 6, hourMax: 18 }
+];
+const bugs = [];
+let bugSpawnTimer = 5;
+function pickBug() {
+  const h = TimeSys.hour;
+  let total = 0;
+  const avail = [];
+  for (const b of BUG_TABLE) {
+    const ok = (b.hourMin < b.hourMax) ? (h >= b.hourMin && h < b.hourMax) : (h >= b.hourMin || h < b.hourMax);
+    if (ok) { avail.push(b); total += b.weight; }
+  }
+  if (avail.length === 0) return 'kupu';
+  let r = Math.random() * total;
+  for (const b of avail) { r -= b.weight; if (r <= 0) return b.id; }
+  return avail[avail.length - 1].id;
+}
+function spawnBug() {
+  if (bugs.length >= 6) return;
+  for (let tries = 0; tries < 8; tries++) {
+    const ang = Math.random() * Math.PI * 2;
+    const dist = 60 + Math.random() * 80;
+    const bx = player.x + Math.cos(ang) * dist, by = player.y + Math.sin(ang) * dist;
+    const tx = Math.floor(bx / TILE), ty = Math.floor(by / TILE);
+    if (tx < 1 || ty < 1 || tx >= MAP_W - 1 || ty >= MAP_H - 1) continue;
+    if (getTile(tx, ty) !== T.GRASS) continue;
+    if (solid[ty * MAP_W + tx]) continue;
+    bugs.push({ id: pickBug(), x: tx * TILE + 8, y: ty * TILE + 8, phase: Math.random() * 6, timer: 12 + Math.random() * 10 });
+    return;
+  }
+}
+function updateBugs(dt) {
+  if (player.scene !== 'world') { bugs.length = 0; return; }
+  bugSpawnTimer -= dt;
+  if (bugSpawnTimer <= 0) { bugSpawnTimer = 6 + Math.random() * 6; if (Math.random() < 0.7) spawnBug(); }
+  for (let i = bugs.length - 1; i >= 0; i--) { bugs[i].timer -= dt; bugs[i].phase += dt * 3; if (bugs[i].timer <= 0) bugs.splice(i, 1); }
+}
+function tryCatchBug() {
+  let nearest = null, bestDist = 24;
+  for (let i = 0; i < bugs.length; i++) { const d = Math.hypot(bugs[i].x - player.x, bugs[i].y - player.y); if (d < bestDist) { bestDist = d; nearest = bugs[i]; } }
+  if (!nearest) { message.show('TIDAK ADA SERANGGA', 1.2); AudioSys.playSfx('error'); return; }
+  inventory.add(nearest.id, 1); CollectionSys.markCaught(nearest.id);
+  message.show('DAPAT ' + ITEMS[nearest.id].name.toUpperCase() + '!', 1.8);
+  AudioSys.playSfx('catch');
+  const idx = bugs.indexOf(nearest); if (idx >= 0) bugs.splice(idx, 1);
+}
+
+/* ---------- 21. MENGGALI ---------- */
+const digSpots = [];
+let digSpawnTimer = 8;
+function spawnDigSpot() {
+  if (digSpots.length >= 4) return;
+  for (let tries = 0; tries < 8; tries++) {
+    const ang = Math.random() * Math.PI * 2;
+    const dist = 40 + Math.random() * 100;
+    const bx = player.x + Math.cos(ang) * dist, by = player.y + Math.sin(ang) * dist;
+    const tx = Math.floor(bx / TILE), ty = Math.floor(by / TILE);
+    if (tx < 1 || ty < 1 || tx >= MAP_W - 1 || ty >= MAP_H - 1) continue;
+    if (getTile(tx, ty) !== T.GRASS) continue;
+    if (solid[ty * MAP_W + tx] || occupied[ty * MAP_W + tx]) continue;
+    digSpots.push({ x: tx * TILE + 8, y: ty * TILE + 8, timer: 25 });
+    return;
+  }
+}
+function updateDigSpots(dt) {
+  if (player.scene !== 'world') { digSpots.length = 0; return; }
+  digSpawnTimer -= dt;
+  if (digSpawnTimer <= 0) { digSpawnTimer = 10 + Math.random() * 8; spawnDigSpot(); }
+  for (let i = digSpots.length - 1; i >= 0; i--) { digSpots[i].timer -= dt; if (digSpots[i].timer <= 0) digSpots.splice(i, 1); }
+}
+function tryDig() {
+  let nearest = null, bestDist = 22;
+  for (let i = 0; i < digSpots.length; i++) { const d = Math.hypot(digSpots[i].x - player.x, digSpots[i].y - player.y); if (d < bestDist) { bestDist = d; nearest = digSpots[i]; } }
+  if (!nearest) { message.show('TIDAK ADA GALIAN', 1.2); AudioSys.playSfx('error'); return; }
+  const r = Math.random();
+  let id;
+  if (r < 0.4) id = 'fosil'; else if (r < 0.7) id = 'seed_bunga'; else if (r < 0.9) id = 'umpan'; else id = 'apel';
+  inventory.add(id, 1); CollectionSys.markCaught(id);
+  message.show('DAPAT ' + ITEMS[id].name.toUpperCase() + '!', 1.8);
+  AudioSys.playSfx('dig');
+  const idx = digSpots.indexOf(nearest); if (idx >= 0) digSpots.splice(idx, 1);
+}
+
+/* ---------- 22. MENEBANG ---------- */
+function findNearestTree() {
+  let nearest = null, bestDist = 28;
+  for (let i = 0; i < objects.length; i++) {
+    const o = objects[i];
+    if (o.type !== 'tree') continue;
+    const dx = o.x + o.img.width / 2 - player.x, dy = o.y + o.img.height - player.y;
+    const d = Math.hypot(dx, dy);
+    if (d < bestDist) { bestDist = d; nearest = o; }
+  }
+  return nearest;
+}
+function tryChop() {
+  const tree = findNearestTree();
+  if (!tree) { message.show('TIDAK ADA POHON DEKAT', 1.2); AudioSys.playSfx('error'); return; }
+  if (tree.hp === undefined) tree.hp = 3;
+  tree.hp--;
+  AudioSys.playSfx('chop');
+  if (tree.hp <= 0) {
+    inventory.add('wood', 2 + Math.floor(Math.random() * 3));
+    if (Math.random() < 0.4) inventory.add('apel', 1);
+    message.show('POHON TUMBANG!', 1.6);
+    AudioSys.playSfx('treefall');
+    const idx = objects.indexOf(tree); if (idx >= 0) objects.splice(idx, 1);
+  } else {
+    message.show('TEBANG LAGI! (' + tree.hp + 'X)', 1.2);
+    inventory.add('wood', 1);
+  }
+}
+
+/* ---------- 23. TANAM ---------- */
+function tryPlant() {
+  let seedIdx = -1;
+  for (let i = 0; i < inventory.slots.length; i++) { if (inventory.slots[i] && inventory.slots[i].id === 'seed_bunga') { seedIdx = i; break; } }
+  if (seedIdx < 0) { message.show('TIDAK ADA BIBIT', 1.2); AudioSys.playSfx('error'); return; }
+  let tx = Math.floor(player.x / TILE), ty = Math.floor(player.y / TILE);
+  if (player.dir === 'down') ty += 1; else if (player.dir === 'up') ty -= 1; else if (player.dir === 'left') tx -= 1; else tx += 1;
+  if (getTile(tx, ty) !== T.GRASS || occupied[ty * MAP_W + tx]) { message.show('TIDAK BISA MENANAM DI SINI', 1.2); AudioSys.playSfx('error'); return; }
+  inventory.removeAt(seedIdx, 1);
+  addFlower(tx, ty, Math.floor(Math.random() * 5));
+  message.show('BUNGA DITANAM', 1.5);
+  AudioSys.playSfx('plant');
+}
+
+/* ---------- 24. TOKO ---------- */
+const shop = { open: false, tab: 0, cursor: 0, buyList: [{ id: 'seed_bunga', price: 10 },{ id: 'umpan', price: 5 },{ id: 'apel', price: 8 }] };
+function getSellPrice(id) { const it = ITEMS[id]; if (!it || it.isTool) return 0; return it.sell || 1; }
+function shopBuy() {
+  const list = shop.buyList;
+  if (shop.cursor >= list.length) return;
+  const item = list[shop.cursor];
+  if (!money.spend(item.price)) { message.show('KEPING TIDAK CUKUP', 1.5); AudioSys.playSfx('error'); return; }
+  inventory.add(item.id, 1);
+  message.show('BELI ' + ITEMS[item.id].name.toUpperCase(), 1.5);
+  AudioSys.playSfx('buy');
+}
+function shopSell() {
+  const slot = inventory.slots[shop.cursor];
+  if (!slot) return;
+  if (ITEMS[slot.id].isTool) { message.show('ALAT TIDAK BISA DIJUAL', 1.2); AudioSys.playSfx('error'); return; }
+  const price = getSellPrice(slot.id);
+  money.add(price); inventory.removeAt(shop.cursor, 1);
+  message.show('JUAL +' + price + ' KEPING', 1.5);
+  AudioSys.playSfx('sell');
+}
+
+/* ---------- 25. KOLEKSI ---------- */
+const CollectionSys = {
+  caught: Object.create(null),
+  markCaught(id) { if (!this.caught[id]) this.caught[id] = 0; this.caught[id]++; },
+  has(id) { return !!this.caught[id]; },
+  open: false, list: []
+};
+function buildCollectionList() {
+  const list = [];
+  for (const id in ITEMS) if (ITEMS[id].category === 'fish' || ITEMS[id].category === 'bug') list.push(id);
+  CollectionSys.list = list;
+}
+
+/* ---------- 26. AUDIO (Web Audio API) ---------- */
+const AudioSys = {
+  ctx: null, master: null, muted: false, ambient: null, ambientTimer: 0, ambientIndex: 0,
+  init() {
+    try {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return false;
+      this.ctx = new AC();
+      this.master = this.ctx.createGain();
+      this.master.gain.value = 0.4;
+      this.master.connect(this.ctx.destination);
+      return true;
+    } catch (e) { return false; }
+  },
+  userGesture() {
+    if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume().catch(() => {});
+  },
+  setMuted(m) {
+    this.muted = m;
+    if (this.master) this.master.gain.value = m ? 0 : 0.4;
+  },
+  toggleMute() {
+    this.setMuted(!this.muted);
+    message.show(this.muted ? 'SUARA MATI' : 'SUARA HIDUP', 1.2);
+  },
+  playSfx(name) {
+    if (!this.ctx || this.muted) return;
+    const c = this.ctx, t = c.currentTime;
+    const mk = (freq, type, dur, vol, slide) => {
+      const o = c.createOscillator(), g = c.createGain();
+      o.type = type || 'square';
+      o.frequency.setValueAtTime(freq, t);
+      if (slide) o.frequency.exponentialRampToValueAtTime(Math.max(20, freq * slide), t + dur);
+      g.gain.setValueAtTime(0, t);
+      g.gain.linearRampToValueAtTime(vol || 0.15, t + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+      o.connect(g); g.connect(this.master);
+      o.start(t); o.stop(t + dur + 0.02);
+    };
+    switch (name) {
+      case 'dialog': mk(520, 'square', 0.06, 0.08); break;
+      case 'gift':   mk(660, 'square', 0.10, 0.12); setTimeout(() => mk(880, 'square', 0.15, 0.12), 90); break;
+      case 'catch':  mk(700, 'square', 0.08, 0.14); setTimeout(() => mk(1000, 'square', 0.10, 0.14), 60); setTimeout(() => mk(1320, 'square', 0.14, 0.14), 130); break;
+      case 'cast':   mk(400, 'triangle', 0.12, 0.10, 0.5); break;
+      case 'bite':   mk(900, 'square', 0.08, 0.14); setTimeout(() => mk(1200, 'square', 0.08, 0.14), 70); break;
+      case 'miss':   mk(300, 'sawtooth', 0.20, 0.10, 0.5); break;
+      case 'dig':    mk(220, 'square', 0.10, 0.10, 0.7); break;
+      case 'chop':   mk(160, 'square', 0.10, 0.12, 0.5); break;
+      case 'treefall': mk(120, 'sawtooth', 0.4, 0.15, 0.4); break;
+      case 'plant':  mk(500, 'triangle', 0.10, 0.10); setTimeout(() => mk(750, 'triangle', 0.10, 0.10), 80); break;
+      case 'buy':    mk(880, 'square', 0.08, 0.12); setTimeout(() => mk(1100, 'square', 0.10, 0.12), 60); break;
+      case 'sell':   mk(1100, 'square', 0.08, 0.12); setTimeout(() => mk(880, 'square', 0.10, 0.12), 60); break;
+      case 'error':  mk(200, 'sawtooth', 0.15, 0.10); break;
+      case 'menu':   mk(660, 'square', 0.05, 0.08); break;
+      case 'enter':  mk(500, 'triangle', 0.15, 0.12); setTimeout(() => mk(750, 'triangle', 0.2, 0.12), 120); break;
+    }
+  },
+  tickAmbient(dt) {
+    if (!this.ctx || this.muted) return;
+    this.ambientTimer -= dt;
+    if (this.ambientTimer <= 0) {
+      this.ambientTimer = 3.6 + Math.random() * 1.2;
+      // Simple pentatonic arpeggio
+      const scale = [261.63, 293.66, 329.63, 392.00, 440.00, 523.25];
+      const note = scale[this.ambientIndex % scale.length];
+      this.ambientIndex++;
+      const c = this.ctx, t = c.currentTime;
+      const o = c.createOscillator(), g = c.createGain();
+      o.type = 'triangle';
+      o.frequency.setValueAtTime(note, t);
+      g.gain.setValueAtTime(0, t);
+      g.gain.linearRampToValueAtTime(0.06, t + 0.4);
+      g.gain.exponentialRampToValueAtTime(0.001, t + 2.0);
+      o.connect(g); g.connect(this.master);
+      o.start(t); o.stop(t + 2.1);
+    }
+  }
+};
+
+/* ---------- 27. TOUCH CONTROLS ---------- */
+const Touch = {
+  active: false, axisX: 0, axisY: 0,
+  joyActive: false, joyStartX: 0, joyStartY: 0, joyCurX: 0, joyCurY: 0,
+  buttons: [],
+  init() {
+    const isTouch = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
+    if (!isTouch) return;
+    this.active = true;
+    const c = display;
+    const getXY = (e) => {
+      const rect = c.getBoundingClientRect();
+      const t = e.touches ? e.touches[0] : e;
+      return { x: (t.clientX - rect.left) / rect.width * W, y: (t.clientY - rect.top) / rect.height * H };
+    };
+    const findTouch = (touches, region) => {
+      for (let i = 0; i < touches.length; i++) {
+        const rect = c.getBoundingClientRect();
+        const tx = (touches[i].clientX - rect.left) / rect.width * W;
+        const ty = (touches[i].clientY - rect.top) / rect.height * H;
+        if (tx >= region.x && tx <= region.x + region.w && ty >= region.y && ty <= region.y + region.h) return { tx, ty };
+      }
+      return null;
+    };
+    const joyRegion = { x: 0, y: H - 70, w: 80, h: 70 };
+    const btnA = { x: W - 40, y: H - 50, w: 32, h: 32, id: 'A' };
+    const btnB = { x: W - 80, y: H - 40, w: 32, h: 32, id: 'B' };
+    const btnM = { x: W - 30, y: 30, w: 24, h: 24, id: 'M' };
+    const btnC = { x: W - 60, y: 30, w: 24, h: 24, id: 'C' };
+    this.buttons = [btnA, btnB, btnC, btnM];
+    const handleStart = (e) => {
+      e.preventDefault();
+      AudioSys.userGesture();
+      const touches = e.touches;
+      // joystick
+      const jt = findTouch(touches, joyRegion);
+      if (jt) { this.joyActive = true; this.joyStartX = jt.tx; this.joyStartY = jt.ty; this.joyCurX = jt.tx; this.joyCurY = jt.ty; }
+      for (const b of this.buttons) {
+        const bt = findTouch(touches, b);
+        if (bt) { this.handleButton(b.id); }
+      }
+    };
+    const handleMove = (e) => {
+      e.preventDefault();
+      if (!this.joyActive) return;
+      const touches = e.touches;
+      const jt = findTouch(touches, { x: 0, y: 0, w: W, h: H });
+      // use any touch to update joystick
+      for (let i = 0; i < touches.length; i++) {
+        const rect = c.getBoundingClientRect();
+        const tx = (touches[i].clientX - rect.left) / rect.width * W;
+        const ty = (touches[i].clientY - rect.top) / rect.height * H;
+        const dx = tx - this.joyStartX, dy = ty - this.joyStartY;
+        const len = Math.hypot(dx, dy);
+        if (len < 40) {
+          this.joyCurX = tx; this.joyCurY = ty;
+          const nx = dx / 20, ny = dy / 20;
+          this.axisX = Math.max(-1, Math.min(1, nx));
+          this.axisY = Math.max(-1, Math.min(1, ny));
+          return;
+        }
+      }
+    };
+    const handleEnd = (e) => {
+      e.preventDefault();
+      if (e.touches.length === 0) { this.joyActive = false; this.axisX = 0; this.axisY = 0; }
+    };
+    c.addEventListener('touchstart', handleStart, { passive: false });
+    c.addEventListener('touchmove', handleMove, { passive: false });
+    c.addEventListener('touchend', handleEnd, { passive: false });
+    c.addEventListener('touchcancel', handleEnd, { passive: false });
+  },
+  handleButton(id) {
+    if (id === 'A') onKeyPressed('KeyE');
+    else if (id === 'B') onKeyPressed('KeyI');
+    else if (id === 'C') onKeyPressed('KeyC');
+    else if (id === 'M') AudioSys.toggleMute();
+  },
+  render() {
+    if (!this.active) return;
+    // Joystick
+    const jx = 40, jy = H - 40;
+    ctx.strokeStyle = 'rgba(243,227,200,0.5)';
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(jx, jy, 22, 0, Math.PI * 2); ctx.stroke();
+    ctx.fillStyle = 'rgba(26,20,18,0.55)';
+    ctx.beginPath(); ctx.arc(jx, jy, 22, 0, Math.PI * 2); ctx.fill();
+    const kx = jx + this.axisX * 14, ky = jy + this.axisY * 14;
+    ctx.fillStyle = 'rgba(255,207,107,0.85)';
+    ctx.beginPath(); ctx.arc(kx, ky, 8, 0, Math.PI * 2); ctx.fill();
+    // Buttons
+    for (const b of this.buttons) {
+      ctx.fillStyle = 'rgba(26,20,18,0.6)';
+      ctx.beginPath(); ctx.arc(b.x + b.w/2, b.y + b.h/2, b.w/2, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = 'rgba(243,227,200,0.7)';
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.arc(b.x + b.w/2, b.y + b.h/2, b.w/2, 0, Math.PI * 2); ctx.stroke();
+      drawTextCentered(b.id, b.x + b.w/2, b.y + b.h/2 - 3, C.uiGold);
+    }
+  }
+};
+
+/* ---------- 28. SAVE / LOAD ---------- */
+const SaveSys = {
+  save() {
+    try {
+      const data = {
+        v: SAVE_VERSION,
+        player: { x: player.x, y: player.y, scene: player.scene, dir: player.dir },
+        money: money.amount,
+        inventory: inventory.slots.map(s => s ? { id: s.id, count: s.count } : null),
+        activeTool: inventory.activeTool,
+        npcAffinity: npcs.map(n => n.affinity),
+        collection: CollectionSys.caught,
+        weather: { type: Weather.type, timer: Weather.timer },
+        day: TimeSys.day,
+        tutorialShown: game.tutorialShown
+      };
+      localStorage.setItem(SAVE_KEY, JSON.stringify(data));
+      return true;
+    } catch (e) { return false; }
+  },
+  load() {
+    try {
+      const raw = localStorage.getItem(SAVE_KEY);
+      if (!raw) return false;
+      const data = JSON.parse(raw);
+      if (!data || data.v !== SAVE_VERSION) return false;
+      // Validasi
+      if (typeof data.player?.x !== 'number' || typeof data.player?.y !== 'number') return false;
+      if (!Array.isArray(data.inventory) || data.inventory.length !== 20) return false;
+      // Terapkan
+      player.x = data.player.x;
+      player.y = data.player.y;
+      player.scene = data.player.scene === 'interior' ? 'interior' : 'world';
+      player.dir = ['down','up','left','right'].includes(data.player.dir) ? data.player.dir : 'down';
+      money.amount = typeof data.money === 'number' ? data.money : 100;
+      for (let i = 0; i < 20; i++) {
+        const s = data.inventory[i];
+        if (s && typeof s.id === 'string' && ITEMS[s.id] && typeof s.count === 'number' && s.count > 0) {
+          inventory.slots[i] = { id: s.id, count: s.count };
+        } else inventory.slots[i] = null;
+      }
+      inventory.activeTool = typeof data.activeTool === 'number' ? Math.max(0, Math.min(4, data.activeTool)) : 0;
+      if (Array.isArray(data.npcAffinity)) {
+        for (let i = 0; i < npcs.length && i < data.npcAffinity.length; i++) {
+          npcs[i].affinity = typeof data.npcAffinity[i] === 'number' ? data.npcAffinity[i] : 0;
+        }
+      }
+      if (data.collection && typeof data.collection === 'object') {
+        CollectionSys.caught = data.collection;
+      }
+      if (data.weather && typeof data.weather.type === 'string') {
+        Weather.type = ['sunny','rain','windy'].includes(data.weather.type) ? data.weather.type : 'sunny';
+        Weather.timer = typeof data.weather.timer === 'number' ? data.weather.timer : 90;
+        Weather.initParticles();
+      }
+      game.tutorialShown = !!data.tutorialShown;
+      return true;
+    } catch (e) { return false; }
+  },
+  clear() {
+    try { localStorage.removeItem(SAVE_KEY); return true; } catch (e) { return false; }
+  },
+  exists() {
+    try { return !!localStorage.getItem(SAVE_KEY); } catch (e) { return false; }
+  }
+};
+let autoSaveTimer = 0;
+function autoSaveTick(dt) {
+  if (game.state !== 'play' || game.paused) return;
+  autoSaveTimer += dt;
+  if (autoSaveTimer >= 30) { autoSaveTimer = 0; SaveSys.save(); }
+}
+
+/* ---------- 29. INTERAKSI UTAMA ---------- */
+function findNearestNPC() {
+  let nearest = null, bestDist = INTERACT_RADIUS;
+  for (let i = 0; i < npcs.length; i++) {
+    const d = Math.hypot(npcs[i].x - player.x, npcs[i].y - player.y);
+    if (d < bestDist) { bestDist = d; nearest = npcs[i]; }
+  }
+  return nearest;
+}
+function nearShopSign() { if (!shopSign) return false; return Math.hypot(shopSign.cx - player.x, shopSign.cy - player.y) < 20; }
+function nearHouseDoor() {
+  for (let i = 0; i < objects.length; i++) {
+    const o = objects[i];
+    if (o.type !== 'house') continue;
+    if (Math.hypot(o.doorX - player.x, o.doorY - player.y) < 18) return o;
+  }
+  return null;
+}
+function interact() {
+  if (player.scene === 'interior') {
+    const pty = Math.floor(player.y / TILE);
+    if (pty >= IN_H - 1) { exitHouse(); return; }
+    message.show('TIDAK ADA APA-APA', 1.0);
+    return;
+  }
+  const npc = findNearestNPC();
+  if (npc) { startDialog(npc); return; }
+  if (nearShopSign()) { shop.open = true; shop.tab = 0; shop.cursor = 0; AudioSys.playSfx('menu'); return; }
+  const house = nearHouseDoor();
+  if (house) { enterHouse(); return; }
+  const slot = inventory.getActive();
+  if (!slot) { message.show('TANGAN KOSONG', 1.0); return; }
+  const toolId = slot.id;
+  if (toolId === 'rod') { startFishing(); return; }
+  if (toolId === 'net') { tryCatchBug(); return; }
+  if (toolId === 'shovel') { tryDig(); return; }
+  if (toolId === 'axe') { tryChop(); return; }
+  if (toolId === '
