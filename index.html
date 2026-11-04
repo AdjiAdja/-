@@ -5,11 +5,12 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#100d0c">
 <title>Pondok Embun — Cozy Village Sim</title>
 <style>
   *{margin:0;padding:0;box-sizing:border-box}
   html,body{width:100%;height:100%;overflow:hidden;background:#100d0c;display:flex;align-items:center;justify-content:center;touch-action:none;-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent;overscroll-behavior:none}
-  canvas{display:block;image-rendering:pixelated;image-rendering:crisp-edges;-ms-interpolation-mode:nearest-neighbor;background:#100d0c}
+  canvas{display:block;image-rendering:pixelated;image-rendering:crisp-edges;-ms-interpolation-mode:nearest-neighbor;background:#100d0c;box-shadow:0 0 20px rgba(0,0,0,0.8)}
 </style>
 </head>
 <body>
@@ -17,8 +18,7 @@
 <script>
 "use strict";
 /* =========================================================================
-   PONDOK EMBUN — Cozy Village Sim (Original) — FINAL
-   Semua 4 tahap digabung dalam satu file.
+   PONDOK EMBUN — Enhanced Mobile Edition
    ========================================================================= */
 
 /* ---------- 1. KONSTANTA ---------- */
@@ -43,7 +43,7 @@ const C = {
   wall1:'#f3e3c8',  wall2:'#e0cba9',
   stone1:'#c2c7cf', stone2:'#9aa1ab', stone3:'#e2e6ec',
   glass:'#9fd4e0',  glass2:'#c8eaf2',
-  outline:'#3a2a22',
+  outline:'#2c1f19',
   skin:'#f7c9a3', hair:'#6b4a2f', shirt:'#e07a5f', shirtS:'#c25b45',
   pants:'#4a6fa5', shoe:'#4a3527',
   uiBorder:'#f3e3c8', uiText:'#f7efdf', uiGold:'#ffcf6b', uiDim:'#b9a99a',
@@ -203,7 +203,9 @@ function getAxis() {
   if (Input.isDown('KeyW') || Input.isDown('ArrowUp'))    y -= 1;
   if (Input.isDown('KeyS') || Input.isDown('ArrowDown'))  y += 1;
   // Touch joystick override
-  if (Touch.active) { x += Touch.axisX; y += Touch.axisY; }
+  if (Touch.active && (!invUI.open && !shop.open && !CollectionSys.open && !game.paused)) { 
+    x += Touch.axisX; y += Touch.axisY; 
+  }
   if (x > 1) x = 1; if (x < -1) x = -1;
   if (y > 1) y = 1; if (y < -1) y = -1;
   axisVec.x = x; axisVec.y = y;
@@ -223,7 +225,7 @@ const ITEMS = {
   daun:   { name: 'Daun',      isTool: false, giftValue: 1, sell: 2,  desc: 'Daun segar.' },
   bunga:  { name: 'Bunga',     isTool: false, giftValue: 3, sell: 4,  desc: 'Bunga cantik.' },
   apel:   { name: 'Apel',      isTool: false, giftValue: 4, sell: 6,  desc: 'Apel manis.' },
-  wood:   { name: 'Kayu',      isTool: false, giftValue: 2, sell: 8,  desc: 'Kayu dari pohon.' },
+  wood:   { name: 'Kayu',      isTool: false, giftValue: 2, sell: 8,  desc: 'Kayu pohon.' },
   fosil:  { name: 'Fosil',     isTool: false, giftValue: 5, sell: 50, desc: 'Fosil kuno.' },
   umpan:  { name: 'Umpan',     isTool: false, giftValue: 1, sell: 3,  desc: 'Umpan pancing.' },
   seed_bunga: { name: 'Bibit', isTool: false, giftValue: 2, sell: 5, desc: 'Bibit bunga.' },
@@ -231,8 +233,8 @@ const ITEMS = {
   ikan_sedang: { name: 'Ikan Sedang', isTool: false, giftValue: 4, sell: 35, category: 'fish', desc: 'Ikan lumayan.' },
   ikan_besar:  { name: 'Ikan Besar',  isTool: false, giftValue: 5, sell: 80, category: 'fish', desc: 'Ikan raksasa!' },
   udang:       { name: 'Udang',       isTool: false, giftValue: 4, sell: 25, category: 'fish', desc: 'Udang segar.' },
-  kupu:     { name: 'Kupu-kupu', isTool: false, giftValue: 3, sell: 20, category: 'bug', desc: 'Kupu warna-warni.' },
-  kumbang:  { name: 'Kumbang',   isTool: false, giftValue: 4, sell: 45, category: 'bug', desc: 'Kumbang berkilau.' },
+  kupu:     { name: 'Kupu-kupu', isTool: false, giftValue: 3, sell: 20, category: 'bug', desc: 'Warna-warni.' },
+  kumbang:  { name: 'Kumbang',   isTool: false, giftValue: 4, sell: 45, category: 'bug', desc: 'Kumbang kilau.' },
   belalang: { name: 'Belalang',  isTool: false, giftValue: 3, sell: 30, category: 'bug', desc: 'Belalang hijau.' }
 };
 
@@ -333,11 +335,11 @@ const TimeSys = {
   },
   getTint() {
     const h = this.hour + this.minute / 60;
-    if (h >= 5 && h < 7)   return { r: 255, g: 200, b: 160, a: 0.14 };
+    if (h >= 5 && h < 7)   return { r: 255, g: 200, b: 160, a: 0.12 };
     if (h >= 7 && h < 16)  return { r: 255, g: 240, b: 200, a: 0.00 };
-    if (h >= 16 && h < 18) return { r: 255, g: 170, b: 90,  a: 0.22 };
-    if (h >= 18 && h < 20) return { r: 120, g: 90,  b: 160, a: 0.32 };
-    return { r: 30, g: 40, b: 90, a: 0.52 };
+    if (h >= 16 && h < 18) return { r: 255, g: 170, b: 90,  a: 0.18 };
+    if (h >= 18 && h < 20) return { r: 90, g: 70,   b: 140, a: 0.35 };
+    return { r: 15, g: 25, b: 60, a: 0.55 };
   },
   getPhase() {
     const h = this.hour;
@@ -349,9 +351,9 @@ const TimeSys = {
   format() { return String(this.hour).padStart(2,'0') + ':' + String(this.minute).padStart(2,'0'); }
 };
 
-/* ---------- 11. CUACA ---------- */
+/* ---------- 11. CUACA & PARTIKEL ---------- */
 const Weather = {
-  type: 'sunny', timer: 90, particles: [],
+  type: 'sunny', timer: 90, particles: [], fireflies: [],
   update(dt) {
     this.timer -= dt;
     if (this.timer <= 0) {
@@ -372,6 +374,26 @@ const Weather = {
         p.y += p.vy * dt + Math.sin(game.time * 2 + p.ph) * 12 * dt;
         if (p.x > W + 8) { p.x = -8; p.y = Math.random() * H; }
       }
+    }
+    
+    // Kunang-kunang malam
+    if (player.scene === 'world' && (TimeSys.hour >= 18 || TimeSys.hour < 5)) {
+      if (this.fireflies.length < 15 && Math.random() < 0.04) {
+         this.fireflies.push({
+             x: camera.x + Math.random() * W, 
+             y: camera.y + Math.random() * H, 
+             vx: (Math.random() - 0.5) * 12, 
+             vy: (Math.random() - 0.5) * 4, 
+             life: 6 + Math.random() * 4
+         });
+      }
+    }
+    for (let i = this.fireflies.length - 1; i >= 0; i--) {
+      let f = this.fireflies[i];
+      f.x += f.vx * dt;
+      f.y += f.vy * dt + Math.sin(game.time * 2 + f.x) * 10 * dt;
+      f.life -= dt;
+      if (f.life <= 0) this.fireflies.splice(i, 1);
     }
   },
   initParticles() {
@@ -397,8 +419,19 @@ const Weather = {
       }
     }
   },
+  renderFireflies() {
+    if (player.scene === 'world' && (TimeSys.hour >= 18 || TimeSys.hour < 5)) {
+      ctx.fillStyle = '#dbff5c'; // kuning-kehijauan neon
+      for (let f of this.fireflies) {
+          const alpha = Math.max(0, Math.min(1, f.life)) * (0.6 + 0.4 * Math.sin(game.time * 5 + f.x));
+          ctx.globalAlpha = alpha;
+          ctx.fillRect(Math.round(f.x - camera.x), Math.round(f.y - camera.y), 2, 2);
+      }
+      ctx.globalAlpha = 1;
+    }
+  },
   getTint() {
-    if (this.type === 'rain')  return { r: 100, g: 120, b: 150, a: 0.20 };
+    if (this.type === 'rain')  return { r: 80, g: 100, b: 130, a: 0.25 };
     if (this.type === 'windy') return { r: 200, g: 220, b: 180, a: 0.05 };
     return null;
   }
@@ -420,8 +453,8 @@ const DUCK_SIDE = ["................","................","...1111111......","..1
 
 const NPC_DEFS = [
   { id: 'lela', name: 'MPOK LELA', personality: 'cheerful',
-    palette: { '1': '#3a2a22', '2': '#f0e0c8', '3': '#f0a0b8', '4': '#3a2a22' },
-    legColors: { pants: '#f0a0b8', shoe: '#c07888', outline: '#3a2a22' },
+    palette: { '1': '#2c1f19', '2': '#f0e0c8', '3': '#f0a0b8', '4': '#2c1f19' },
+    legColors: { pants: '#f0a0b8', shoe: '#c07888', outline: '#2c1f19' },
     bodies: { down: RABBIT_DOWN, up: RABBIT_UP, side: RABBIT_SIDE },
     spawnX: 456, spawnY: 424,
     greetings: { stranger: ['HALO! BUNGA DI SINI CANTIK YA~','KAMU ORANG BARU YA? SELAMAT DATANG!'], acquainted: ['EH, KAMU LAGI! MAU MAIN?'], friendly: ['KAMU TEMAN BAIKKU! AKU SENANG SEKALI~','BUNGA-BUNGA INI UNTUKMU, HEHE.'] } },
@@ -438,8 +471,8 @@ const NPC_DEFS = [
     spawnX: 424, spawnY: 408,
     greetings: { stranger: ['NYAA... NGANTUK... ADA APA?','BIARKAN AKU TIDUR...'], acquainted: ['NYA~ KAMU DATANG LAGI...'], friendly: ['NYAA~ AKU SENANG KAMU DI SINI...','TEMANI AKU TIDUR SIANG, NYA~'] } },
   { id: 'kwek', name: 'IBU KWEK', personality: 'motherly',
-    palette: { '1': '#3a2a22', '2': '#f0d868', '3': '#f09030', '4': '#3a2a22' },
-    legColors: { pants: '#6fa8d0', shoe: '#f09030', outline: '#3a2a22' },
+    palette: { '1': '#2c1f19', '2': '#f0d868', '3': '#f09030', '4': '#2c1f19' },
+    legColors: { pants: '#6fa8d0', shoe: '#f09030', outline: '#2c1f19' },
     bodies: { down: DUCK_DOWN, up: DUCK_UP, side: DUCK_SIDE },
     spawnX: 520, spawnY: 424,
     greetings: { stranger: ['EH, HALO SAYANG! SUDAH MAKAN?','HATI-HATI DI JALAN YA~'], acquainted: ['ADUH, KAMU KESINI LAGI! MAKAN DULU?'], friendly: ['KAMU SEPERTI ANAKKU SENDIRI~','KALAU BUTUH APA-APA, DATANG SAJA YA!'] } }
@@ -497,7 +530,7 @@ function bakeWaterTile(v, frame) {
 function bakeTree(v) {
   const c = makeCanvas(32, 42);
   const g = c.getContext('2d');
-  drawShadowEllipse(g, 16, 39, 11, 3, 'rgba(58,42,34,0.20)');
+  drawShadowEllipse(g, 16, 39, 11, 4, 'rgba(20,15,10,0.3)');
   g.fillStyle = C.outline; g.fillRect(13, 21, 7, 19);
   g.fillStyle = C.trunk1; g.fillRect(14, 22, 5, 18);
   g.fillStyle = C.trunk2; g.fillRect(17, 22, 2, 18);
@@ -514,7 +547,7 @@ function bakeTree(v) {
 function bakeBush() {
   const c = makeCanvas(16, 16);
   const g = c.getContext('2d');
-  drawShadowEllipse(g, 8, 14, 6, 2, 'rgba(58,42,34,0.18)');
+  drawShadowEllipse(g, 8, 14, 6, 2, 'rgba(20,15,10,0.25)');
   fillCirclePixel(g, 8, 9, 6, C.outline);
   fillCirclePixel(g, 8, 9, 5, C.leaf4);
   fillCirclePixel(g, 7, 8, 4, C.leaf1);
@@ -524,7 +557,7 @@ function bakeBush() {
 function bakeRock() {
   const c = makeCanvas(16, 16);
   const g = c.getContext('2d');
-  drawShadowEllipse(g, 8, 14, 6, 2, 'rgba(58,42,34,0.18)');
+  drawShadowEllipse(g, 8, 14, 6, 2, 'rgba(20,15,10,0.25)');
   fillCirclePixel(g, 8, 10, 5, C.outline);
   fillCirclePixel(g, 8, 10, 4, C.stone2);
   fillCirclePixel(g, 7, 9, 3, C.stone1);
@@ -545,7 +578,7 @@ function bakeFlower(color, frame) {
 function bakeHouse() {
   const c = makeCanvas(64, 56);
   const g = c.getContext('2d');
-  drawShadowEllipse(g, 32, 52, 30, 4, 'rgba(58,42,34,0.20)');
+  drawShadowEllipse(g, 32, 52, 30, 5, 'rgba(20,15,10,0.3)');
   g.fillStyle = C.outline; g.fillRect(4, 26, 56, 26);
   g.fillStyle = C.wall1; g.fillRect(5, 27, 54, 24);
   g.fillStyle = C.wall2; g.fillRect(5, 45, 54, 6);
@@ -585,7 +618,7 @@ function bakeHouse() {
 function bakeSign() {
   const c = makeCanvas(16, 22);
   const g = c.getContext('2d');
-  drawShadowEllipse(g, 8, 21, 6, 1, 'rgba(58,42,34,0.20)');
+  drawShadowEllipse(g, 8, 21, 6, 1.5, 'rgba(20,15,10,0.3)');
   g.fillStyle = C.outline; g.fillRect(3, 4, 10, 12);
   g.fillStyle = C.wood1; g.fillRect(4, 5, 8, 10);
   g.fillStyle = C.wood3; g.fillRect(5, 7, 6, 1); g.fillRect(5, 9, 4, 1); g.fillRect(5, 11, 5, 1);
@@ -665,7 +698,7 @@ let playerShadow = null;
 function bakePlayerShadow() {
   const c = makeCanvas(16, 8);
   const g = c.getContext('2d');
-  drawShadowEllipse(g, 8, 4, 6, 3, 'rgba(58,42,34,0.26)');
+  drawShadowEllipse(g, 8, 4, 6, 3, 'rgba(20,15,10,0.3)');
   playerShadow = c;
 }
 const bugSprites = {};
@@ -676,7 +709,7 @@ function bakeBugSprites() {
     const spread = f ? 2 : 3;
     g.fillStyle = '#f0a0d0'; g.fillRect(4 - spread, 3, spread, 4); g.fillRect(8, 3, spread, 4);
     g.fillStyle = '#f0e0a0'; g.fillRect(5 - spread, 7, spread - 1, 2); g.fillRect(8, 7, spread - 1, 2);
-    g.fillStyle = '#3a2a22'; g.fillRect(5, 3, 2, 7); g.fillRect(5, 2, 2, 1);
+    g.fillStyle = '#2c1f19'; g.fillRect(5, 3, 2, 7); g.fillRect(5, 2, 2, 1);
     bugSprites['kupu_' + f] = c;
   }
   for (const f of [0, 1]) {
@@ -684,7 +717,7 @@ function bakeBugSprites() {
     const g = c.getContext('2d');
     g.fillStyle = '#4060a0'; g.fillRect(4, 4, 4, 5);
     g.fillStyle = '#90b0e0'; g.fillRect(5, 5, 2, 3);
-    g.fillStyle = '#3a2a22'; g.fillRect(3, 4, 6, 1); g.fillRect(4, 3, 1, 1); g.fillRect(7, 3, 1, 1);
+    g.fillStyle = '#2c1f19'; g.fillRect(3, 4, 6, 1); g.fillRect(4, 3, 1, 1); g.fillRect(7, 3, 1, 1);
     if (f) { g.fillRect(3, 2, 1, 1); g.fillRect(8, 2, 1, 1); } else { g.fillRect(4, 2, 1, 1); g.fillRect(7, 2, 1, 1); }
     bugSprites['kumbang_' + f] = c;
   }
@@ -693,7 +726,7 @@ function bakeBugSprites() {
     const g = c.getContext('2d');
     g.fillStyle = '#90c060'; g.fillRect(3, f ? 4 : 5, 7, 3);
     g.fillStyle = '#c0e090'; g.fillRect(4, f ? 5 : 6, 5, 1);
-    g.fillStyle = '#3a2a22'; g.fillRect(2, f ? 4 : 5, 1, 1); g.fillRect(8, f ? 2 : 3, 1, 3); g.fillRect(6, f ? 7 : 8, 1, 2); g.fillRect(4, f ? 7 : 8, 1, 2);
+    g.fillStyle = '#2c1f19'; g.fillRect(2, f ? 4 : 5, 1, 1); g.fillRect(8, f ? 2 : 3, 1, 3); g.fillRect(6, f ? 7 : 8, 1, 2); g.fillRect(4, f ? 7 : 8, 1, 2);
     bugSprites['belalang_' + f] = c;
   }
 }
@@ -1369,17 +1402,21 @@ const AudioSys = {
 const Touch = {
   active: false, axisX: 0, axisY: 0,
   joyActive: false, joyStartX: 0, joyStartY: 0, joyCurX: 0, joyCurY: 0,
-  buttons: [],
+  buttons: [], uiCooldown: 0,
   init() {
     const isTouch = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
     if (!isTouch) return;
     this.active = true;
     const c = display;
-    const getXY = (e) => {
-      const rect = c.getBoundingClientRect();
-      const t = e.touches ? e.touches[0] : e;
-      return { x: (t.clientX - rect.left) / rect.width * W, y: (t.clientY - rect.top) / rect.height * H };
-    };
+    
+    // Ergonomic Layout for thumbs
+    const btnA = { x: W - 42, y: H - 42, w: 36, h: 36, id: 'A', text: 'A' }; // E / Enter
+    const btnB = { x: W - 82, y: H - 32, w: 28, h: 28, id: 'B', text: 'TAS' }; // I / Tab
+    const btnT = { x: W - 32, y: H - 82, w: 28, h: 28, id: 'T', text: 'ALAT' }; // Q
+    const btnC = { x: W - 60, y: 10, w: 20, h: 20, id: 'C', text: 'BUKU' }; // C
+    const btnEsc = { x: W - 30, y: 10, w: 20, h: 20, id: 'ESC', text: '||' }; // Esc
+    this.buttons = [btnA, btnB, btnT, btnC, btnEsc];
+
     const findTouch = (touches, region) => {
       for (let i = 0; i < touches.length; i++) {
         const rect = c.getBoundingClientRect();
@@ -1389,29 +1426,35 @@ const Touch = {
       }
       return null;
     };
-    const joyRegion = { x: 0, y: H - 70, w: 80, h: 70 };
-    const btnA = { x: W - 40, y: H - 50, w: 32, h: 32, id: 'A' };
-    const btnB = { x: W - 80, y: H - 40, w: 32, h: 32, id: 'B' };
-    const btnM = { x: W - 30, y: 30, w: 24, h: 24, id: 'M' };
-    const btnC = { x: W - 60, y: 30, w: 24, h: 24, id: 'C' };
-    this.buttons = [btnA, btnB, btnC, btnM];
+    
+    const joyRegion = { x: 0, y: H - 90, w: 90, h: 90 };
+    
     const handleStart = (e) => {
       e.preventDefault();
       AudioSys.userGesture();
       const touches = e.touches;
+      
+      // Check UI full-screen taps for advancement
+      if (game.state === 'title' || !game.tutorialShown || dialog.active || fishing.state === 'minigame' || fishing.state === 'bite') {
+         // Cek jika menekan tombol spesifik B di Title (Load game)
+         if (game.state === 'title' && findTouch(touches, btnB)) { onKeyPressed('KeyL'); return; }
+         onKeyPressed('KeyE');
+         return;
+      }
+      
       // joystick
       const jt = findTouch(touches, joyRegion);
       if (jt) { this.joyActive = true; this.joyStartX = jt.tx; this.joyStartY = jt.ty; this.joyCurX = jt.tx; this.joyCurY = jt.ty; }
+      
+      // buttons
       for (const b of this.buttons) {
-        const bt = findTouch(touches, b);
-        if (bt) { this.handleButton(b.id); }
+        if (findTouch(touches, b)) this.handleButton(b.id);
       }
     };
     const handleMove = (e) => {
       e.preventDefault();
       if (!this.joyActive) return;
       const touches = e.touches;
-      const jt = findTouch(touches, { x: 0, y: 0, w: W, h: H });
       // use any touch to update joystick
       for (let i = 0; i < touches.length; i++) {
         const rect = c.getBoundingClientRect();
@@ -1419,9 +1462,9 @@ const Touch = {
         const ty = (touches[i].clientY - rect.top) / rect.height * H;
         const dx = tx - this.joyStartX, dy = ty - this.joyStartY;
         const len = Math.hypot(dx, dy);
-        if (len < 40) {
+        if (len < 60) {
           this.joyCurX = tx; this.joyCurY = ty;
-          const nx = dx / 20, ny = dy / 20;
+          const nx = dx / 25, ny = dy / 25;
           this.axisX = Math.max(-1, Math.min(1, nx));
           this.axisY = Math.max(-1, Math.min(1, ny));
           return;
@@ -1439,30 +1482,45 @@ const Touch = {
   },
   handleButton(id) {
     if (id === 'A') onKeyPressed('KeyE');
-    else if (id === 'B') onKeyPressed('KeyI');
+    else if (id === 'B') {
+      if (shop.open) onKeyPressed('Tab');
+      else onKeyPressed('KeyI');
+    }
+    else if (id === 'T') onKeyPressed('KeyQ');
     else if (id === 'C') onKeyPressed('KeyC');
-    else if (id === 'M') AudioSys.toggleMute();
+    else if (id === 'ESC') onKeyPressed('Escape');
+  },
+  updateUI(dt) {
+    if (this.uiCooldown > 0) this.uiCooldown -= dt;
+    if (this.joyActive && this.uiCooldown <= 0) {
+      if (invUI.open || shop.open || CollectionSys.open) {
+         if (this.axisX > 0.5) { onKeyPressed('ArrowRight'); this.uiCooldown = 0.25; }
+         else if (this.axisX < -0.5) { onKeyPressed('ArrowLeft'); this.uiCooldown = 0.25; }
+         else if (this.axisY > 0.5) { onKeyPressed('ArrowDown'); this.uiCooldown = 0.25; }
+         else if (this.axisY < -0.5) { onKeyPressed('ArrowUp'); this.uiCooldown = 0.25; }
+      }
+    }
   },
   render() {
     if (!this.active) return;
     // Joystick
-    const jx = 40, jy = H - 40;
-    ctx.strokeStyle = 'rgba(243,227,200,0.5)';
+    const jx = 45, jy = H - 45;
+    ctx.strokeStyle = 'rgba(243,227,200,0.4)';
     ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.arc(jx, jy, 22, 0, Math.PI * 2); ctx.stroke();
-    ctx.fillStyle = 'rgba(26,20,18,0.55)';
-    ctx.beginPath(); ctx.arc(jx, jy, 22, 0, Math.PI * 2); ctx.fill();
-    const kx = jx + this.axisX * 14, ky = jy + this.axisY * 14;
+    ctx.beginPath(); ctx.arc(jx, jy, 26, 0, Math.PI * 2); ctx.stroke();
+    ctx.fillStyle = 'rgba(26,20,18,0.6)';
+    ctx.beginPath(); ctx.arc(jx, jy, 26, 0, Math.PI * 2); ctx.fill();
+    const kx = jx + this.axisX * 16, ky = jy + this.axisY * 16;
     ctx.fillStyle = 'rgba(255,207,107,0.85)';
-    ctx.beginPath(); ctx.arc(kx, ky, 8, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(kx, ky, 10, 0, Math.PI * 2); ctx.fill();
     // Buttons
     for (const b of this.buttons) {
-      ctx.fillStyle = 'rgba(26,20,18,0.6)';
+      ctx.fillStyle = 'rgba(26,20,18,0.75)';
       ctx.beginPath(); ctx.arc(b.x + b.w/2, b.y + b.h/2, b.w/2, 0, Math.PI * 2); ctx.fill();
-      ctx.strokeStyle = 'rgba(243,227,200,0.7)';
-      ctx.lineWidth = 1;
+      ctx.strokeStyle = 'rgba(243,227,200,0.8)';
+      ctx.lineWidth = 1.5;
       ctx.beginPath(); ctx.arc(b.x + b.w/2, b.y + b.h/2, b.w/2, 0, Math.PI * 2); ctx.stroke();
-      drawTextCentered(b.id, b.x + b.w/2, b.y + b.h/2 - 3, C.uiGold);
+      drawTextCentered(b.text, b.x + b.w/2, b.y + b.h/2 - 3, C.uiGold);
     }
   }
 };
@@ -1705,6 +1763,7 @@ function applyTint() {
   if (t1 && t1.a > 0) { ctx.fillStyle = 'rgba(' + t1.r + ',' + t1.g + ',' + t1.b + ',' + t1.a + ')'; ctx.fillRect(0, 0, W, H); }
   if (t2 && t2.a > 0) { ctx.fillStyle = 'rgba(' + t2.r + ',' + t2.g + ',' + t2.b + ',' + t2.a + ')'; ctx.fillRect(0, 0, W, H); }
   Weather.render();
+  Weather.renderFireflies(); // Added fireflies overlay here so it pops out of tint
 }
 
 /* ---------- 32. RENDER UI ---------- */
@@ -1720,15 +1779,17 @@ function renderHUD() {
   const mw = textWidth(mStr) + 10;
   drawPanel(W - mw - 4, 21, mw, 13);
   drawText(mStr, W - mw + 1, 24, C.uiGold);
-  // Mute button
-  const muteX = 4, muteY = 21;
-  drawPanel(muteX, muteY, 20, 13);
-  drawText(AudioSys.muted ? 'X' : 'S', muteX + 8, muteY + 3, AudioSys.muted ? C.uiRed : C.uiGreen);
-  if (Touch.active) {
-    // smaller HUD, but panel top right + bottom hotbar still okay
+  
+  // Render Mute icon on touch device conditionally based on space, skip if cluttering
+  if (!Touch.active) {
+    const muteX = 4, muteY = 21;
+    drawPanel(muteX, muteY, 20, 13);
+    drawText(AudioSys.muted ? 'X' : 'S', muteX + 8, muteY + 3, AudioSys.muted ? C.uiRed : C.uiGreen);
   }
 }
 function renderHotbar() {
+  if (Touch.active && (invUI.open || shop.open || CollectionSys.open)) return; // Sembunyikan kalau tertutup UI
+  
   const slots = 5, sw = 20, gap = 2;
   const totalW = slots * sw + (slots - 1) * gap;
   const x0 = Math.round((W - totalW) / 2), y0 = H - 22;
@@ -1744,7 +1805,7 @@ function renderHotbar() {
     ctx.fillRect(sx, y0, 1, sw); ctx.fillRect(sx + sw - 1, y0, 1, sw);
     const slot = inventory.slots[i];
     if (slot && itemIcons[slot.id]) ctx.drawImage(itemIcons[slot.id], sx + 2, y0 + 2);
-    drawText(String(i + 1), sx + 1, y0 + 1, isSel ? C.uiGold : C.uiDim);
+    if(!Touch.active) drawText(String(i + 1), sx + 1, y0 + 1, isSel ? C.uiGold : C.uiDim);
   }
 }
 function renderInventory() {
@@ -1752,7 +1813,7 @@ function renderInventory() {
   const pw = 180, ph = 128;
   const px = Math.round((W - pw) / 2), py = Math.round((H - ph) / 2);
   drawPanel(px, py, pw, ph);
-  drawTextCentered(invUI.mode === 'gift' ? 'PILIH HADIAH' : 'TAS', W / 2, py + 7, C.uiGold);
+  drawTextCentered(invUI.mode === 'gift' ? 'PILIH HADIAH' : 'TAS (JOYSTICK: PILIH)', W / 2, py + 7, C.uiGold);
   const cols = 5, rows = 4, sw = 22, gap = 2;
   const gridW = cols * sw + (cols - 1) * gap;
   const gx = Math.round(px + (pw - gridW) / 2), gy = py + 20;
@@ -1769,13 +1830,14 @@ function renderInventory() {
       ctx.drawImage(itemIcons[slot.id], sx + 3, sy + 3);
       if (slot.count > 1) drawText(String(slot.count), sx + sw - 6, sy + sw - 8, C.uiText);
     }
-    if (idx < 5) drawText(String(idx + 1), sx + 1, sy + 1, C.uiDim);
+    if (idx < 5 && !Touch.active) drawText(String(idx + 1), sx + 1, sy + 1, C.uiDim);
   }
   const sel = inventory.slots[invUI.cursor];
   let infoY = gy + rows * (sw + gap) + 4;
   if (sel && ITEMS[sel.id]) { drawText(ITEMS[sel.id].name, gx, infoY, C.uiText); infoY += 9; drawText(ITEMS[sel.id].desc, gx, infoY, C.uiDim); }
   else drawText('KOSONG', gx, infoY, C.uiDim);
-  const hint = invUI.mode === 'gift' ? 'ENTER: BERI   ESC: BATAL' : 'ENTER: PAKAI   I/ESC: TUTUP';
+  
+  let hint = invUI.mode === 'gift' ? 'ENTER/A: BERI   ESC/B: BATAL' : 'ENTER/A: PAKAI   ESC/B: TUTUP';
   drawTextCentered(hint, W / 2, py + ph - 11, C.uiGold);
 }
 function renderDialog() {
@@ -1785,8 +1847,8 @@ function renderDialog() {
   drawText(dialog.npc.name, px + 6, py + 5, C.uiGold);
   drawText(dialog.text, px + 6, py + 16, C.uiText);
   if (dialog.typewriterDone) {
-    drawText(isLastLine() ? 'E: TUTUP   G: HADIAH   ESC: KELUAR' : 'E: LANJUT', px + 6, py + 29, C.uiDim);
-  } else drawText('E: LEWATI', px + 6, py + 29, C.uiDim);
+    drawText(isLastLine() ? (Touch.active ? 'A: TUTUP  G: HADIAH' : 'E: TUTUP   G: HADIAH   ESC: KELUAR') : (Touch.active ? 'SENTUH / A: LANJUT' : 'E: LANJUT'), px + 6, py + 29, C.uiDim);
+  } else drawText(Touch.active ? 'SENTUH / A: LEWATI' : 'E: LEWATI', px + 6, py + 29, C.uiDim);
 }
 function renderMessage() {
   if (message.timer <= 0) return;
@@ -1801,7 +1863,7 @@ function renderFishingUI() {
   else if (fishing.state === 'waiting') drawTextCentered('MENUNGGU IKAN...', W / 2, 70, C.uiText);
   else if (fishing.state === 'bite') {
     drawTextCentered('! TARIK SEKARANG !', W / 2, 60, C.uiGold);
-    if ((Math.floor(game.time * 8) & 1) === 0) drawTextCentered('TEKAN E', W / 2, 72, C.uiText);
+    if ((Math.floor(game.time * 8) & 1) === 0) drawTextCentered(Touch.active ? 'TEKAN A' : 'TEKAN E', W / 2, 72, C.uiText);
   } else if (fishing.state === 'minigame') {
     const bw = 160, bh = 8;
     const bx = Math.round((W - bw) / 2), by = 86;
@@ -1810,7 +1872,7 @@ function renderFishingUI() {
     ctx.fillStyle = C.uiGreen; ctx.fillRect(bx + Math.round(bw * 0.35), by, Math.round(bw * 0.30), bh);
     const cx = bx + Math.round((fishing.cursor / 100) * bw);
     ctx.fillStyle = C.uiGold; ctx.fillRect(cx - 1, by - 2, 3, bh + 4);
-    drawTextCentered('TEKAN E DI ZONA HIJAU', W / 2, by + bh + 4, C.uiText);
+    drawTextCentered(Touch.active ? 'TEKAN A DI ZONA HIJAU' : 'TEKAN E DI ZONA HIJAU', W / 2, by + bh + 4, C.uiText);
   } else if (fishing.state === 'result') drawTextCentered(fishing.result, W / 2, 70, C.uiGold);
 }
 function renderShop() {
@@ -1856,7 +1918,7 @@ function renderShop() {
     }
   }
   drawText('KEPING: ' + money.amount, lx, py + ph - 22, C.uiGold);
-  drawTextCentered(shop.tab === 0 ? 'ENTER: BELI   TAB: JUAL   ESC: TUTUP' : 'ENTER: JUAL   TAB: BELI   ESC: TUTUP', W / 2, py + ph - 11, C.uiDim);
+  drawTextCentered(Touch.active ? 'A: BELI/JUAL   B: GANTI TAB   ESC: TUTUP' : 'ENTER: AKSI   TAB: UBAH   ESC: TUTUP', W / 2, py + ph - 11, C.uiDim);
 }
 function renderCollection() {
   if (!CollectionSys.open) return;
@@ -1882,7 +1944,7 @@ function renderCollection() {
     }
     drawText(caught ? ITEMS[id].name : '???', lx + 20, ly + 5, caught ? C.uiText : C.uiDim);
   }
-  drawTextCentered('ESC: TUTUP', W / 2, py + ph - 11, C.uiGold);
+  drawTextCentered('ESC / BUKU: TUTUP', W / 2, py + ph - 11, C.uiGold);
 }
 function renderPause() {
   ctx.fillStyle = 'rgba(16,12,10,0.60)'; ctx.fillRect(0, 0, W, H);
@@ -1890,10 +1952,16 @@ function renderPause() {
   const px = (W - pw) >> 1, py = (H - ph) >> 1;
   drawPanel(px, py, pw, ph);
   drawTextCentered('JEDA', W / 2, py + 8, C.uiGold);
-  const lines = ['WASD / PANAH : BERJALAN','E / SPASI    : INTERAKSI','Q / 1-5      : GANTI ALAT','I : TAS    C : ENSIKLOPEDIA','M : SUARA   F : SIMPAN'];
-  for (let i = 0; i < lines.length; i++) drawText(lines[i], px + 8, py + 22 + i * 9, C.uiText);
+  
+  if (Touch.active) {
+    const lines = ['JOYSTICK : BERJALAN / NAVIGASI','TOMBOL A : INTERAKSI / OK','TOMBOL B : BUKA TAS / KEMBALI','TOMBOL T : GANTI ALAT','TOMBOL C : ENSIKLOPEDIA'];
+    for (let i = 0; i < lines.length; i++) drawText(lines[i], px + 8, py + 22 + i * 11, C.uiText);
+  } else {
+    const lines = ['WASD / PANAH : BERJALAN','E / SPASI    : INTERAKSI','Q / 1-5      : GANTI ALAT','I : TAS    C : ENSIKLOPEDIA','M : SUARA   F : SIMPAN'];
+    for (let i = 0; i < lines.length; i++) drawText(lines[i], px + 8, py + 22 + i * 9, C.uiText);
+  }
   drawText('WAKTU: ' + TimeSys.format() + ' ' + TimeSys.getPhase(), px + 8, py + ph - 22, C.uiDim);
-  drawTextCentered('ESC UNTUK LANJUT', W / 2, py + ph - 11, C.uiGold);
+  drawTextCentered('ESC / || UNTUK LANJUT', W / 2, py + ph - 11, C.uiGold);
 }
 function renderTutorial() {
   if (game.tutorialShown) return;
@@ -1903,19 +1971,16 @@ function renderTutorial() {
   drawPanel(px, py, pw, ph);
   drawTextCentered('SELAMAT DATANG DI', W / 2, py + 8, C.uiDim);
   drawTextCentered('PONDOK EMBUN', W / 2, py + 18, C.uiGold);
-  const lines = [
-    'WASD / PANAH : BERJALAN',
-    'E / SPASI    : BICARA & PAKAI ALAT',
-    'Q / 1-5      : GANTI ALAT',
-    'I : TAS   C : ENSIKLOPEDIA',
-    'M : SUARA   ESC : JEDA',
-    'CARI PENDUDUK & BICARA!'
-  ];
-  for (let i = 0; i < lines.length; i++) drawTextCentered(lines[i], W / 2, py + 32 + i * 10, i === 5 ? C.uiGold : C.uiText);
-  if ((Math.floor(game.time * 2) & 1) === 0) drawTextCentered('TEKAN E UNTUK MULAI', W / 2, py + ph - 11, C.uiGold);
+  
+  const lines = Touch.active 
+    ? ['SENTUH JOYSTICK KIRI : BERJALAN', 'SENTUH TOMBOL A KANAN: INTERAKSI', 'TOMBOL T : GANTI ALAT', 'TOMBOL B : BUKA TAS/INVENTARIS', 'CARI PENDUDUK & BICARA!']
+    : ['WASD / PANAH : BERJALAN', 'E / SPASI    : BICARA & PAKAI ALAT', 'Q / 1-5      : GANTI ALAT', 'I : TAS   C : ENSIKLOPEDIA', 'CARI PENDUDUK & BICARA!'];
+    
+  for (let i = 0; i < lines.length; i++) drawTextCentered(lines[i], W / 2, py + 32 + i * 10, i === lines.length-1 ? C.uiGold : C.uiText);
+  
+  if ((Math.floor(game.time * 2) & 1) === 0) drawTextCentered(Touch.active ? 'SENTUH LAYAR / A UNTUK MULAI' : 'TEKAN E UNTUK MULAI', W / 2, py + ph - 11, C.uiGold);
 }
 function renderTitle() {
-  // render world background for visual
   if (worldGround) renderWorld();
   else { ctx.fillStyle = C.grass1; ctx.fillRect(0, 0, W, H); }
   applyTint();
@@ -1926,10 +1991,9 @@ function renderTitle() {
   drawTextCentered('PONDOK EMBUN', W / 2, py + 12, C.uiGold);
   drawTextCentered('DESA KECIL YANG HANGAT', W / 2, py + 26, C.uiDim);
   ctx.fillStyle = C.uiBorder; ctx.fillRect(px + 16, py + 40, pw - 32, 1);
-  if ((Math.floor(game.time * 2) & 1) === 0) drawTextCentered('TEKAN ENTER UNTUK MULAI', W / 2, py + 54, C.uiText);
-  if (game.hasSave) drawTextCentered('L: LANJUTKAN PERMAINAN', W / 2, py + 70, C.uiGreen);
-  drawTextCentered('VERSI LENGKAP - 4 TAHAP', W / 2, py + 86, C.uiDim);
-  drawTextCentered('AUDIO + SAVE + TOUCH', W / 2, py + 98, C.uiDim);
+  if ((Math.floor(game.time * 2) & 1) === 0) drawTextCentered(Touch.active ? 'SENTUH LAYAR / A UNTUK MULAI' : 'TEKAN ENTER UNTUK MULAI', W / 2, py + 54, C.uiText);
+  if (game.hasSave) drawTextCentered(Touch.active ? 'SENTUH TOMBOL B UNTUK LANJUTKAN' : 'L: LANJUTKAN PERMAINAN', W / 2, py + 70, C.uiGreen);
+  drawTextCentered('ENHANCED MOBILE EDITION', W / 2, py + 98, C.uiGold);
   drawTextCentered('ORISINAL - TANPA ASET EKSTERNAL', W / 2, py + 112, C.uiDim);
 }
 
@@ -1943,6 +2007,9 @@ function update(dt) {
   AudioSys.tickAmbient(dt);
   updateDialog(dt);
   updateFishing(dt);
+  
+  if (Touch.active) Touch.updateUI(dt);
+
   if (!game.tutorialShown) return; // pause semua saat tutorial
   if (fishing.state === 'idle' && !dialog.active && !invUI.open && !shop.open && !CollectionSys.open) {
     updatePlayer(dt);
@@ -2041,7 +2108,7 @@ function onKeyPressed(code) {
     return;
   }
   if (game.state === 'title') {
-    if (code === 'Enter' || code === 'Space' || code === 'NumpadEnter') {
+    if (code === 'Enter' || code === 'Space' || code === 'NumpadEnter' || code === 'KeyE') {
       AudioSys.playSfx('enter');
       game.state = 'play';
       game.paused = false;
