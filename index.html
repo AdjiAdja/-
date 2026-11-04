@@ -4,7 +4,6 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="mobile-web-app-capable" content="yes">
 <title>Pondok Embun 3D — Cozy Village Sim</title>
 <style>
   *{margin:0;padding:0;box-sizing:border-box}
@@ -19,18 +18,18 @@
 <script>
 "use strict";
 /* =========================================================================
-   PONDOK EMBUN 3D — Voxel Cozy Village Sim
-   WebGL murni, tanpa library. Mobile-first.
+   PONDOK EMBUN 3D — Voxel Cozy Village Sim (FINAL + ROADMAP)
+   - Musim berganti (semi/panas/gugur/dingin)
+   - Interior rumah 3D penuh
+   - Partikel cuaca 3D (hujan/angin)
+   - NPC jadwal harian
+   - Pohon tumbuh bertahap
    ========================================================================= */
 
-/* ---------- 1. KONSTANTA ---------- */
-const MAP_W=64,MAP_H=48;
-const TILE=1;
-const WORLD_W=MAP_W*TILE,WORLD_H=MAP_H*TILE;
-const STEP=1/60;
-const SPEED=3.5,NPC_SPEED=1.3;
-const INTERACT_R=1.8;
-const SAVE_KEY='pondok-embun-3d-v1',SAVE_VERSION=1;
+const MAP_W=64,MAP_H=48,TILE=1,CHUNK=16;
+const NUM_CX=Math.ceil(MAP_W/CHUNK),NUM_CY=Math.ceil(MAP_H/CHUNK);
+const STEP=1/60,SPEED=3.5,NPC_SPEED=1.3,INTERACT_R=1.8;
+const SAVE_KEY='pondok-embun-3d-v2',SAVE_VERSION=2;
 
 const COL={
   grassA:[0.55,0.80,0.42],grassB:[0.47,0.72,0.35],grassC:[0.62,0.85,0.50],
@@ -44,44 +43,40 @@ const COL={
   roof:[0.85,0.42,0.38],roofD:[0.68,0.30,0.28],
   wall:[0.95,0.88,0.78],wallD:[0.82,0.72,0.60],
   glass:[0.62,0.82,0.88],door:[0.55,0.35,0.20],
-  skin:[0.96,0.78,0.62],skinD:[0.85,0.65,0.50],
-  hair:[0.42,0.28,0.18],hairD:[0.30,0.20,0.12],
-  shirt:[0.88,0.48,0.35],pants:[0.28,0.42,0.62],shoe:[0.28,0.20,0.15],
+  floorA:[0.68,0.50,0.35],floorB:[0.58,0.42,0.28],
+  inWall:[0.42,0.30,0.22],inWallTop:[0.32,0.22,0.16],
+  bed:[0.85,0.55,0.60],bedSheet:[0.97,0.94,0.88],
+  tableW:[0.72,0.54,0.36],chairW:[0.55,0.40,0.26],
   uiBg:[0.10,0.08,0.07,0.94],uiBorder:[0.95,0.88,0.78],uiText:[0.97,0.94,0.88],
   uiGold:[1.0,0.81,0.42],uiDim:[0.72,0.65,0.58],uiGreen:[0.54,0.87,0.48],
-  uiRed:[0.91,0.44,0.44],uiSel:[1.0,0.81,0.42],uiNight:[0.10,0.14,0.32]
+  uiRed:[0.91,0.44,0.44]
 };
 
-/* ---------- 2. MATH ---------- */
+/* ---------- MATH ---------- */
 const V3={
   sub:(a,b)=>[a[0]-b[0],a[1]-b[1],a[2]-b[2]],
-  add:(a,b)=>[a[0]+b[0],a[1]+b[1],a[2]+b[2]],
-  scale:(a,s)=>[a[0]*s,a[1]*s,a[2]*s],
-  dot:(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2],
   cross:(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]],
+  dot:(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2],
   len:a=>Math.sqrt(a[0]*a[0]+a[1]*a[1]+a[2]*a[2]),
   norm:a=>{const l=V3.len(a)||1;return[a[0]/l,a[1]/l,a[2]/l]}
 };
 const M4={
   perspective:(fov,aspect,near,far)=>{
     const f=1/Math.tan(fov/2),nf=1/(near-far);
-    return new Float32Array([f/aspect,0,0,0, 0,f,0,0, 0,0,(far+near)*nf,-1, 0,0,2*far*near*nf,0]);
+    return new Float32Array([f/aspect,0,0,0,0,f,0,0,0,0,(far+near)*nf,-1,0,0,2*far*near*nf,0]);
   },
-  lookAt:(eye,target,up)=>{
-    const z=V3.norm(V3.sub(eye,target));
+  lookAt:(eye,tgt,up)=>{
+    const z=V3.norm(V3.sub(eye,tgt));
     const x=V3.norm(V3.cross(up,z));
     const y=V3.cross(z,x);
-    return new Float32Array([
-      x[0],y[0],z[0],0, x[1],y[1],z[1],0, x[2],y[2],z[2],0,
-      -V3.dot(x,eye),-V3.dot(y,eye),-V3.dot(z,eye),1
-    ]);
+    return new Float32Array([x[0],y[0],z[0],0,x[1],y[1],z[1],0,x[2],y[2],z[2],0,-V3.dot(x,eye),-V3.dot(y,eye),-V3.dot(z,eye),1]);
   }
 };
 
-/* ---------- 3. UTILITAS ---------- */
+/* ---------- UTILITAS ---------- */
 function hash2(x,y,s){
   let h=Math.imul(x|0,374761393)+Math.imul(y|0,668265263)+Math.imul(s|0,1442695041);
-  h=Math.imul(h^(h>>>13),1274126177); h=h^(h>>>16);
+  h=Math.imul(h^(h>>>13),1274126177);h=h^(h>>>16);
   return (h>>>0)/4294967296;
 }
 function mulberry32(a){
@@ -92,21 +87,15 @@ function mulberry32(a){
     return ((t^(t>>>14))>>>0)/4294967296;
   };
 }
-function lerp(a,b,t){return a+(b-a)*t}
-function clamp(v,a,b){return v<a?a:(v>b?b:v)}
 
-/* ---------- 4. WEBGL SETUP ---------- */
+/* ---------- WEBGL ---------- */
 const glCanvas=document.getElementById('gl');
 const gl=glCanvas.getContext('webgl2',{antialias:true,alpha:false})||glCanvas.getContext('webgl',{antialias:true,alpha:false});
 if(!gl){alert('WebGL tidak didukung');throw new Error('no webgl')}
 
-function compileShader(type,src){
-  const s=gl.createShader(type);
-  gl.shaderSource(s,src);gl.compileShader(s);
-  if(!gl.getShaderParameter(s,gl.COMPILE_STATUS)){
-    console.error(gl.getShaderInfoLog(s),src);
-    throw new Error('shader');
-  }
+function compileShader(t,src){
+  const s=gl.createShader(t);gl.shaderSource(s,src);gl.compileShader(s);
+  if(!gl.getShaderParameter(s,gl.COMPILE_STATUS)){console.error(gl.getShaderInfoLog(s),src);throw new Error('shader')}
   return s;
 }
 function createProgram(vs,fs){
@@ -114,77 +103,65 @@ function createProgram(vs,fs){
   gl.attachShader(p,compileShader(gl.VERTEX_SHADER,vs));
   gl.attachShader(p,compileShader(gl.FRAGMENT_SHADER,fs));
   gl.linkProgram(p);
-  if(!gl.getProgramParameter(p,gl.LINK_STATUS)){
-    console.error(gl.getProgramInfoLog(p));
-    throw new Error('program');
-  }
+  if(!gl.getProgramParameter(p,gl.LINK_STATUS)){console.error(gl.getProgramInfoLog(p));throw new Error('program')}
   return p;
 }
 
 const voxelVS=`
-attribute vec3 aPos;
-attribute vec3 aNormal;
-attribute vec3 aColor;
-uniform mat4 uVP;
-uniform vec3 uLight;
+attribute vec3 aPos;attribute vec3 aNormal;attribute vec3 aColor;
+uniform mat4 uVP;uniform vec3 uLight;uniform vec3 uTint;
 varying vec3 vColor;
 void main(){
   gl_Position=uVP*vec4(aPos,1.0);
   float d=max(dot(normalize(aNormal),uLight),0.0);
-  vColor=aColor*(0.55+d*0.55);
+  vColor=aColor*(0.55+d*0.55)*uTint;
 }`;
-const voxelFS=`
-precision mediump float;
-varying vec3 vColor;
-void main(){gl_FragColor=vec4(vColor,1.0);}`;
+const voxelFS=`precision mediump float;varying vec3 vColor;void main(){gl_FragColor=vec4(vColor,1.0);}`;
 const voxelProg=createProgram(voxelVS,voxelFS);
 const vLoc={
   aPos:gl.getAttribLocation(voxelProg,'aPos'),
   aNormal:gl.getAttribLocation(voxelProg,'aNormal'),
   aColor:gl.getAttribLocation(voxelProg,'aColor'),
   uVP:gl.getUniformLocation(voxelProg,'uVP'),
-  uLight:gl.getUniformLocation(voxelProg,'uLight')
+  uLight:gl.getUniformLocation(voxelProg,'uLight'),
+  uTint:gl.getUniformLocation(voxelProg,'uTint')
 };
 
 const bbVS=`
-attribute vec2 aPos;
-attribute vec2 aUV;
-attribute vec4 aCS;
-attribute vec4 aTint;
-uniform mat4 uVP;
-uniform vec3 uCamR;
-uniform vec3 uCamU;
-varying vec2 vUV;
-varying vec4 vTint;
+attribute vec2 aPos;attribute vec2 aUV;attribute vec4 aCS;
+uniform mat4 uVP;uniform vec3 uCamR;uniform vec3 uCamU;
+varying vec2 vUV;varying vec3 vTintRgb;varying float vAlpha;
 void main(){
   vec3 wp=aCS.xyz+uCamR*aPos.x*aCS.w+uCamU*aPos.y*aCS.w;
-  gl_Position=uVP*vec4(wp,1.0);
+  vec4 cp=uVP*vec4(aCS.xyz,1.0);
+  vec4 p=uVP*vec4(wp,1.0);
+  p.z=cp.z;
+  gl_Position=p;
   vUV=aUV;
-  vTint=aTint;
 }`;
 const bbFS=`
 precision mediump float;
 uniform sampler2D uTex;
+uniform vec4 uTint;
 varying vec2 vUV;
-varying vec4 vTint;
 void main(){
   vec4 c=texture2D(uTex,vUV);
   if(c.a<0.1)discard;
-  gl_FragColor=vec4(c.rgb*vTint.rgb,c.a*vTint.a);
+  gl_FragColor=vec4(c.rgb*uTint.rgb,c.a*uTint.a);
 }`;
 const bbProg=createProgram(bbVS,bbFS);
 const bLoc={
   aPos:gl.getAttribLocation(bbProg,'aPos'),
   aUV:gl.getAttribLocation(bbProg,'aUV'),
   aCS:gl.getAttribLocation(bbProg,'aCS'),
-  aTint:gl.getAttribLocation(bbProg,'aTint'),
   uVP:gl.getUniformLocation(bbProg,'uVP'),
   uCamR:gl.getUniformLocation(bbProg,'uCamR'),
   uCamU:gl.getUniformLocation(bbProg,'uCamU'),
-  uTex:gl.getUniformLocation(bbProg,'uTex')
+  uTex:gl.getUniformLocation(bbProg,'uTex'),
+  uTint:gl.getUniformLocation(bbProg,'uTint')
 };
 
-/* ---------- 5. CANVAS SETUP & RESIZE ---------- */
+/* ---------- CANVAS & RESIZE ---------- */
 const uiCanvas=document.getElementById('ui');
 const uctx=uiCanvas.getContext('2d');
 const UI_W=320,UI_H=180;
@@ -194,22 +171,18 @@ function resize(){
   glCanvas.width=Math.floor(window.innerWidth*dpr);
   glCanvas.height=Math.floor(window.innerHeight*dpr);
   gl.viewport(0,0,glCanvas.width,glCanvas.height);
-  const cw=window.innerWidth,ch=window.innerHeight;
-  uiScale=Math.floor(Math.min(cw/UI_W,ch/UI_H));
-  if(uiScale<1)uiScale=1;
-  uiCanvas.width=UI_W*uiScale*dpr;
-  uiCanvas.height=UI_H*uiScale*dpr;
+  uiScale=Math.max(1,Math.floor(Math.min(window.innerWidth/UI_W,window.innerHeight/UI_H)));
+  uiCanvas.width=UI_W*uiScale*dpr;uiCanvas.height=UI_H*uiScale*dpr;
   uiCanvas.style.width=(UI_W*uiScale)+'px';
   uiCanvas.style.height=(UI_H*uiScale)+'px';
-  uiOffX=(cw-UI_W*uiScale)/2;
-  uiOffY=(ch-UI_H*uiScale)/2;
-  uiCanvas.style.left=uiOffX+'px';
-  uiCanvas.style.top=uiOffY+'px';
+  uiOffX=(window.innerWidth-UI_W*uiScale)/2;
+  uiOffY=(window.innerHeight-UI_H*uiScale)/2;
+  uiCanvas.style.left=uiOffX+'px';uiCanvas.style.top=uiOffY+'px';
   uctx.imageSmoothingEnabled=false;
   uctx.setTransform(uiScale*dpr,0,0,uiScale*dpr,0,0);
 }
 
-/* ---------- 6. FONT 5x7 PIXEL ---------- */
+/* ---------- FONT 5x7 ---------- */
 const FW=5,FH=7,FCW=6,FCH=8,FCOLS=16;
 const GLYPHS={
   'A':[14,17,17,31,17,17,17],'B':[30,17,17,30,17,17,30],'C':[14,17,16,16,16,17,14],'D':[30,17,17,17,17,17,30],
@@ -228,17 +201,13 @@ const GLYPHS={
   '*':[0,21,14,31,14,21,0],'%':[25,26,2,4,8,11,19],'<':[2,4,8,16,8,4,2],'>':[8,4,2,1,2,4,8],
   '=':[0,0,31,0,31,0,0],'#':[10,10,31,10,31,10,10]
 };
-const GKEYS=Object.keys(GLYPHS);
-const GIDX={};
-GKEYS.forEach((k,i)=>GIDX[k]=i);
+const GKEYS=Object.keys(GLYPHS);const GIDX={};GKEYS.forEach((k,i)=>GIDX[k]=i);
 const fontCache={};
 function getFont(color){
   if(fontCache[color])return fontCache[color];
   const rows=Math.ceil(GKEYS.length/FCOLS);
-  const cv=document.createElement('canvas');
-  cv.width=FCOLS*FCW;cv.height=rows*FCH;
-  const g=cv.getContext('2d');
-  g.fillStyle=color;
+  const cv=document.createElement('canvas');cv.width=FCOLS*FCW;cv.height=rows*FCH;
+  const g=cv.getContext('2d');g.fillStyle=color;
   for(let i=0;i<GKEYS.length;i++){
     const bits=GLYPHS[GKEYS[i]];
     const ox=(i%FCOLS)*FCW,oy=Math.floor(i/FCOLS)*FCH;
@@ -246,21 +215,18 @@ function getFont(color){
       if(bits[r]&(1<<(FW-1-b)))g.fillRect(ox+b,oy+r,1,1);
     }
   }
-  fontCache[color]=cv;
-  return cv;
+  fontCache[color]=cv;return cv;
 }
 function tw(s){return s.length*FCW-1}
 function drawText(str,x,y,rgb){
-  const color='rgb('+Math.round(rgb[0]*255)+','+Math.round(rgb[1]*255)+','+Math.round(rgb[2]*255)+')';
-  const atlas=getFont(color);
-  str=String(str).toUpperCase();
-  let cx=Math.round(x);
-  const cy=Math.round(y);
+  const c='rgb('+Math.round(rgb[0]*255)+','+Math.round(rgb[1]*255)+','+Math.round(rgb[2]*255)+')';
+  const a=getFont(c);str=String(str).toUpperCase();
+  let cx=Math.round(x),cy=Math.round(y);
   for(let i=0;i<str.length;i++){
     const ch=str[i],idx=GIDX[ch];
     if(idx!==undefined&&ch!==' '){
       const sx=(idx%FCOLS)*FCW,sy=Math.floor(idx/FCOLS)*FCH;
-      uctx.drawImage(atlas,sx,sy,FCW,FCH,cx,cy,FCW,FCH);
+      uctx.drawImage(a,sx,sy,FCW,FCH,cx,cy,FCW,FCH);
     }
     cx+=FCW;
   }
@@ -277,14 +243,76 @@ function panel(x,y,w,h){
   uctx.fillRect(x,y+h-1,1,1);uctx.fillRect(x+w-1,y+h-1,1,1);
 }
 
-/* ---------- 7. PEMAIN & DUNIA (STATE) ---------- */
+/* ---------- STATE ---------- */
 const game={state:'title',paused:false,time:0,tutorial:false,hasSave:false};
-const player={x:28,y:22,dir:'down',frame:0,animT:0,moving:false,scene:'world',vy:0};
-const camera={yaw:Math.PI, pitch:0.85, dist:9, height:3.5};
+const player={x:28,z:23,dir:'down',frame:0,animT:0,moving:false,scene:'world'};
+const camera={yaw:Math.PI,pitch:0.85,dist:9};
 const camPos={x:0,y:0,z:0};
 const npcs=[];
 
-/* ---------- 8. INVENTARIS & ITEM ---------- */
+/* ---------- MUSIM ---------- */
+const Season={
+  name:'semi',prev:'semi',
+  update(){
+    const m=new Date().getMonth();
+    let n;
+    if(m<=1||m>=11)n='dingin';
+    else if(m<=4)n='semi';
+    else if(m<=7)n='panas';
+    else n='gugur';
+    if(n!==this.prev){
+      this.prev=n;this.name=n;
+      if(player.scene==='world'&&typeof rebuildAllChunks==='function')rebuildAllChunks();
+      message.show('MUSIM '+n.toUpperCase(),2.2);
+    }
+  },
+  grassMod(){
+    if(this.name==='gugur')return[1.10,0.85,0.50];
+    if(this.name==='dingin')return[0.85,0.92,1.05];
+    if(this.name==='panas')return[0.95,1.05,0.85];
+    return[1,1,1];
+  },
+  leafMod(){
+    if(this.name==='gugur')return[1.20,0.70,0.35];
+    if(this.name==='dingin')return[0.90,0.95,1.05];
+    return[1,1,1];
+  },
+  tint(){
+    if(this.name==='dingin')return[0.94,0.97,1.04];
+    if(this.name==='gugur')return[1.05,0.93,0.80];
+    if(this.name==='panas')return[1.04,0.99,0.88];
+    return[1,1,1];
+  }
+};
+
+/* ---------- TIME / WEATHER ---------- */
+const TimeSys={hour:12,min:0,
+  update(){const d=new Date();this.hour=d.getHours();this.min=d.getMinutes()},
+  phase(){const h=this.hour;if(h>=5&&h<10)return'PAGI';if(h>=10&&h<15)return'SIANG';if(h>=15&&h<18)return'SORE';return'MALAM'},
+  fmt(){return String(this.hour).padStart(2,'0')+':'+String(this.min).padStart(2,'0')},
+  lightTint(){
+    const h=this.hour+this.min/60;
+    if(h>=5&&h<7)return[1.0,0.85,0.7];
+    if(h>=7&&h<16)return[1.0,1.0,0.95];
+    if(h>=16&&h<18)return[1.0,0.78,0.55];
+    if(h>=18&&h<20)return[0.55,0.5,0.75];
+    return[0.3,0.35,0.55];
+  }
+};
+const Weather={type:'sunny',timer:120,
+  update(dt){
+    this.timer-=dt;
+    if(this.timer<=0){
+      this.timer=120+Math.random()*180;
+      const r=Math.random();
+      const old=this.type;
+      this.type=r<0.55?'sunny':(r<0.85?'rain':'windy');
+      if(this.type!==old&&typeof WX!=='undefined')WX.respawn();
+    }
+  }
+};
+
+/* ---------- ITEM ---------- */
 const ITEMS={
   net:{name:'Jaring',isTool:true,desc:'Tangkap serangga.'},
   rod:{name:'Pancing',isTool:true,desc:'Memancing.'},
@@ -297,7 +325,8 @@ const ITEMS={
   wood:{name:'Kayu',isTool:false,gift:2,sell:8},
   fosil:{name:'Fosil',isTool:false,gift:5,sell:50},
   umpan:{name:'Umpan',isTool:false,gift:1,sell:3},
-  seed:{name:'Bibit',isTool:false,gift:2,sell:5},
+  seed:{name:'Bibit Bunga',isTool:false,gift:2,sell:5},
+  seed_pohon:{name:'Bibit Pohon',isTool:false,gift:3,sell:12},
   ikan_kecil:{name:'Ikan Kecil',isTool:false,gift:3,sell:15,cat:'fish'},
   ikan_sedang:{name:'Ikan Sedang',isTool:false,gift:4,sell:35,cat:'fish'},
   ikan_besar:{name:'Ikan Besar',isTool:false,gift:5,sell:80,cat:'fish'},
@@ -306,13 +335,14 @@ const ITEMS={
   kumbang:{name:'Kumbang',isTool:false,gift:4,sell:45,cat:'bug'},
   belalang:{name:'Belalang',isTool:false,gift:3,sell:30,cat:'bug'}
 };
-const ITEM_COLORS={
+const ICON_COL={
   net:[.55,.42,.28],rod:[.55,.42,.28],shovel:[.55,.42,.28],axe:[.55,.42,.28],water:[.4,.55,.7],
   daun:[.35,.7,.3],bunga:[.95,.6,.75],apel:[.85,.3,.3],wood:[.7,.55,.4],fosil:[.6,.5,.35],
-  umpan:[.85,.4,.4],seed:[.65,.45,.3],
+  umpan:[.85,.4,.4],seed:[.65,.45,.3],seed_pohon:[.4,.6,.25],
   ikan_kecil:[.65,.75,.85],ikan_sedang:[.9,.6,.3],ikan_besar:[.3,.45,.65],udang:[.95,.5,.5],
   kupu:[.9,.6,.8],kumbang:[.25,.35,.6],belalang:[.55,.75,.35]
 };
+
 const inv={slots:new Array(20).fill(null),active:0,
   add(id,n){
     n=n||1;const item=ITEMS[id];if(!item)return false;
@@ -326,8 +356,7 @@ const inv={slots:new Array(20).fill(null),active:0,
     }
     for(let i=0;i<this.slots.length;i++){
       if(!this.slots[i]){
-        const a=Math.min(n,max);
-        this.slots[i]={id,n:a};n-=a;
+        const a=Math.min(n,max);this.slots[i]={id,n:a};n-=a;
         if(n<=0)return true;
       }
     }
@@ -349,243 +378,206 @@ const invUI={open:false,cursor:0,mode:'normal'};
 const message={text:'',timer:0,show(t,d){this.text=t;this.timer=d||2}};
 const money={amount:100,add(n){this.amount+=n},spend(n){if(this.amount>=n){this.amount-=n;return true}return false}};
 
-/* ---------- 9. TIME & WEATHER ---------- */
-const TimeSys={hour:12,min:0,day:1,
-  update(){const d=new Date();this.hour=d.getHours();this.min=d.getMinutes();this.day=Math.floor(Date.now()/86400000)},
-  phase(){const h=this.hour;if(h>=5&&h<10)return'PAGI';if(h>=10&&h<15)return'SIANG';if(h>=15&&h<18)return'SORE';return'MALAM'},
-  fmt(){return String(this.hour).padStart(2,'0')+':'+String(this.min).padStart(2,'0')},
-  lightTint(){
-    const h=this.hour+this.min/60;
-    if(h>=5&&h<7)return[1.0,0.85,0.7];
-    if(h>=7&&h<16)return[1.0,1.0,0.95];
-    if(h>=16&&h<18)return[1.0,0.78,0.55];
-    if(h>=18&&h<20)return[0.55,0.5,0.75];
-    return[0.3,0.35,0.55];
-  }
-};
-const Weather={type:'sunny',timer:120,
-  update(dt){
-    this.timer-=dt;
-    if(this.timer<=0){
-      this.timer=120+Math.random()*180;
-      const r=Math.random();
-      this.type=r<0.6?'sunny':(r<0.85?'rain':'windy');
-    }
-  }
-};
+/* ---------- SPRITE ATLAS ---------- */
+const PAL_PLAYER={'1':[.23,.16,.13],'2':[.96,.78,.62],'4':[.42,.28,.18],'5':[.88,.48,.35]};
+const PLAYER_DOWN=["................","...1111111111...","..144444444441..","..144444444441..","..142222222241..","..142122221241..","..142222222241..","...1111111111...","...1555555551...","..125555555521..","..125555555521..","..125555555521..","...1555555551..."];
+const PLAYER_UP=["................","...1111111111...","..144444444441..","..144444444441..","..144444444441..","..144444444441..","..144444444441..","...1111111111...","...1555555551...","..125555555521..","..125555555521..","..125555555521..","...1555555551..."];
+const PLAYER_SIDE=["................","....111111111...","...14444444441..","...14444444441..","...12224444441..","...12124444441..","...12224444441..","....111111111...","...1555555551...","..125555555521..","..125555555521..","..125555555521..","...1555555551..."];
 
-/* ---------- 10. DATA SPRITE KARAKTER (2D, untuk billboard) ---------- */
-const PAL_PLAYER={'1':[.23,.16,.13],'2':[.96,.78,.62],'4':[.42,.28,.18],'5':[.88,.48,.35],'6':[.75,.35,.25]};
-const PLAYER_DOWN=[
-"................","...1111111111...","..144444444441..","..144444444441..",
-"..142222222241..","..142122221241..","..142222222241..","...1111111111...",
-"...1555555551...","..125555555521..","..125555555521..","..125555555521..",
-"...1555555551..."
-];
-const PLAYER_UP=[
-"................","...1111111111...","..144444444441..","..144444444441..",
-"..144444444441..","..144444444441..","..144444444441..","...1111111111...",
-"...1555555551...","..125555555521..","..125555555521..","..125555555521..",
-"...1555555551..."
-];
-const PLAYER_SIDE=[
-"................","....111111111...","...14444444441..","...14444444441..",
-"...12224444441..","...12124444441..","...12224444441..","....111111111...",
-"...1555555551...","..125555555521..","..125555555521..","..125555555521..",
-"...1555555551..."
-];
 const NPC_DEFS=[
-  {id:'lela',name:'MPOK LELA',personality:'cheerful',spawnX:28.5,spawnY:26.5,
-    pal:{'1':[.23,.16,.13],'2':[.94,.88,.78],'3':[.94,.63,.72],'4':[.23,.16,.13]},
-    legs:[.94,.63,.72],
-    body:["................","...11......11...","...121....121...","...131....131...","...111....111...","..11222222211...",".122222222221...",".122422224221...",".122222222221...",".122233222221...",".122222222221...","..1222222221....","...11111111....."],
-    greet:{s:['HALO! BUNGA DI SINI CANTIK YA~','KAMU ORANG BARU YA?'],a:['EH KAMU LAGI!'],f:['KAMU TEMAN BAIKKU!']}
-  },
-  {id:'bimo',name:'PAK BIMO',personality:'gruff',spawnX:33.5,spawnY:22.5,
-    pal:{'1':[.18,.12,.08],'2':[.63,.41,.25],'3':[.85,.69,.53],'4':[.10,.06,.04]},
-    legs:[.42,.27,.16],
-    body:["................","..11........11..","..121......121..","..111111111111..",".12222222222221.",".12242222422221.",".12222222222221.",".12332222332221.",".12222222222221.",".12222222222221.","..122222222221..","..122222222221..","...1111111111..."],
-    greet:{s:['HMM? ADA APA NAK?'],a:['OH KAMU. ADA APA?'],f:['KAMU ANAK BAIK.']}
-  },
-  {id:'nyo',name:'NYO',personality:'sleepy',spawnX:26.5,spawnY:25.5,
-    pal:{'1':[.17,.10,.06],'2':[.88,.54,.29],'3':[.94,.85,.66],'4':[.17,.10,.06]},
-    legs:[.54,.42,.69],
-    body:["................","..1..........1..","..12........21..","..121......121..","..111111111111..",".12222222222221.",".12242222422221.",".12332222332221.",".12222222222221.",".12222222222221.","..122222222221..","..122222222221..","...1111111111..."],
-    greet:{s:['NYAA... NGANTUK...'],a:['NYA~ KAMU LAGI...'],f:['NYAA~ SENANG KAMU DI SINI...']}
-  },
-  {id:'kwek',name:'IBU KWEK',personality:'motherly',spawnX:32.5,spawnY:26.5,
-    pal:{'1':[.23,.16,.13],'2':[.94,.85,.41],'3':[.94,.56,.19],'4':[.23,.16,.13]},
-    legs:[.44,.65,.82],
-    body:["................","................","....11111111....","...1222222221...","..122222222221..","..124222224221..","..122222222221..","..122223332221..","..122222222221..","...1222222221...","..122222222221..","..122222222221..","...1111111111..."],
-    greet:{s:['HALO SAYANG! SUDAH MAKAN?'],a:['KAMU KESINI LAGI!'],f:['KAMU SEPERTI ANAKKU~']}
-  }
+  {id:'lela',name:'MPOK LELA',personality:'cheerful',spawnX:28.5,spawnZ:26.5,
+   pal:{'1':[.23,.16,.13],'2':[.94,.88,.78],'3':[.94,.63,.72]},legs:[.94,.63,.72],
+   body:["................","...11......11...","...121....121...","...131....131...","...111....111...","..11222222211...",".122222222221...",".122422224221...",".122222222221...",".122233222221...",".122222222221...","..1222222221....","...11111111....."],
+   sched:{pagi:[28,26],siang:[32,24],sore:[34,22],malam:[30,20]},
+   greet:{s:['HALO! BUNGA DI SINI CANTIK YA~','KAMU ORANG BARU YA?'],a:['EH KAMU LAGI!'],f:['KAMU TEMAN BAIKKU!']}},
+  {id:'bimo',name:'PAK BIMO',personality:'gruff',spawnX:33.5,spawnZ:22.5,
+   pal:{'1':[.18,.12,.08],'2':[.63,.41,.25],'3':[.85,.69,.53]},legs:[.42,.27,.16],
+   body:["................","..11........11..","..121......121..","..111111111111..",".12222222222221.",".12242222422221.",".12222222222221.",".12332222332221.",".12222222222221.",".12222222222221.","..122222222221..","..122222222221..","...1111111111..."],
+   sched:{pagi:[36,28],siang:[34,26],sore:[28,22],malam:[30,20]},
+   greet:{s:['HMM? ADA APA NAK?'],a:['OH KAMU. ADA APA?'],f:['KAMU ANAK BAIK.']}},
+  {id:'nyo',name:'NYO',personality:'sleepy',spawnX:26.5,spawnZ:25.5,
+   pal:{'1':[.17,.10,.06],'2':[.88,.54,.29],'3':[.94,.85,.66]},legs:[.54,.42,.69],
+   body:["................","..1..........1..","..12........21..","..121......121..","..111111111111..",".12222222222221.",".12242222422221.",".12332222332221.",".12222222222221.",".12222222222221.","..122222222221..","..122222222221..","...1111111111..."],
+   sched:{pagi:[28,23],siang:[28,23],sore:[32,25],malam:[28,23]},
+   greet:{s:['NYAA... NGANTUK...'],a:['NYA~ KAMU LAGI...'],f:['NYAA~ SENANG KAMU DI SINI...']}},
+  {id:'kwek',name:'IBU KWEK',personality:'motherly',spawnX:32.5,spawnZ:26.5,
+   pal:{'1':[.23,.16,.13],'2':[.94,.85,.41],'3':[.94,.56,.19]},legs:[.44,.65,.82],
+   body:["................","................","....11111111....","...1222222221...","..122222222221..","..124222224221..","..122222222221..","..122223332221..","..122222222221..","...1222222221...","..122222222221..","..122222222221..","...1111111111..."],
+   sched:{pagi:[30,24],siang:[30,26],sore:[32,26],malam:[30,22]},
+   greet:{s:['HALO SAYANG! SUDAH MAKAN?'],a:['KAMU KESINI LAGI!'],f:['KAMU SEPERTI ANAKKU~']}}
 ];
 
-/* ---------- 11. BAKING SPRITE ATLAS (untuk billboard WebGL) ---------- */
-const ATLAS_W=16*4, ATLAS_H=16*16; // 4 kolom (frame) x N baris (16 per karakter untuk 4 dir? no — 4 frame per dir, 4 dir = 16 sprites)
+const ATLAS_W=64,ATLAS_H=16*16; // 4 frames × 16 rows
 const spriteUV={};
 let atlasCanvas=null;
 function bakeSpriteAtlas(){
   atlasCanvas=document.createElement('canvas');
-  atlasCanvas.width=16*8; // 8 kolom untuk muat 4 frame x 4 dir... hmm
-  atlasCanvas.height=16*8;
-  const g=atlasCanvas.getContext('2d');
-  g.imageSmoothingEnabled=false;
-  let row=0;
-  function drawSprite(rows,pal,x,y){
+  atlasCanvas.width=ATLAS_W;atlasCanvas.height=ATLAS_H;
+  const g=atlasCanvas.getContext('2d');g.imageSmoothingEnabled=false;
+  function drawSprite(rows,pal,legs,x,y){
     for(let r=0;r<rows.length&&r<16;r++){
       const line=rows[r];
       for(let c=0;c<line.length&&c<16;c++){
         const ch=line[c];
         if(ch==='.'||ch==='0')continue;
-        const col=pal[ch];
-        if(!col)continue;
+        const col=pal[ch];if(!col)continue;
         g.fillStyle='rgb('+Math.round(col[0]*255)+','+Math.round(col[1]*255)+','+Math.round(col[2]*255)+')';
         g.fillRect(x+c,y+r,1,1);
       }
     }
-    // legs
-    g.fillStyle='rgb(74,111,165)';g.fillRect(x+4,y+13,8,1);g.fillRect(x+4,y+14,8,1);
-    g.fillStyle='rgb(58,42,34)';g.fillRect(x+3,y+15,4,1);g.fillRect(x+9,y+15,4,1);
+    const lp=[.42,.60,.85],sh=[.28,.20,.15],ol=[.23,.16,.13];
+    g.fillStyle='rgb('+Math.round(lp[0]*255)+','+Math.round(lp[1]*255)+','+Math.round(lp[2]*255)+')';
+    g.fillRect(x+4,y+13,8,1);g.fillRect(x+4,y+14,8,1);
+    g.fillStyle='rgb('+Math.round(ol[0]*255)+','+Math.round(ol[1]*255)+','+Math.round(ol[2]*255)+')';
+    g.fillRect(x+3,y+15,4,1);g.fillRect(x+9,y+15,4,1);
   }
-  // Player: 4 dirs x 4 frames
-  for(let d=0;d<4;d++){
+  // Player: 3 rows (down, up, side)
+  for(let d=0;d<3;d++){
     const rows=d===0?PLAYER_DOWN:(d===1?PLAYER_UP:PLAYER_SIDE);
-    for(let f=0;f<4;f++){
-      drawSprite(rows,PAL_PLAYER,f*16,d*16);
-    }
+    for(let f=0;f<4;f++)drawSprite(rows,PAL_PLAYER,null,f*16,d*16);
   }
-  // NPCs
+  // NPCs: rows 3-14 (3 each)
   for(let ni=0;ni<NPC_DEFS.length;ni++){
     const def=NPC_DEFS[ni];
-    const pal={...def.pal};
-    for(let d=0;d<4;d++){
+    for(let d=0;d<3;d++){
       for(let f=0;f<4;f++){
-        const y=(4+ni*4+d)*16;
-        drawSprite(def.body,pal,f*16,y);
+        drawSprite(def.body,def.pal,def.legs,f*16,(3+ni*3+d)*16);
       }
     }
   }
+  // White pixel row 15
+  g.fillStyle='#fff';g.fillRect(0,15*16,16,16);
 }
-function makeTexture(canvas){
-  const tex=gl.createTexture();
-  gl.bindTexture(gl.TEXTURE_2D,tex);
-  gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,canvas);
+function makeTexture(c){
+  const t=gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D,t);
+  gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,c);
   gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.NEAREST);
   gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.NEAREST);
   gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);
   gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
-  return tex;
+  return t;
 }
 let spriteTex=null;
 
-/* ---------- 12. MESH BUILDER ---------- */
-function addQuad(arr,arrC,arrN,x1,y1,z1,x2,y2,z2,x3,y3,z3,x4,y4,z4,nx,ny,nz,col){
-  arr.push(x1,y1,z1,x2,y2,z2,x3,y3,z3, x1,y1,z1,x3,y3,z3,x4,y4,z4);
-  arrN.push(nx,ny,nz,nx,ny,nz,nx,ny,nz, nx,ny,nz,nx,ny,nz,nx,ny,nz);
-  for(let i=0;i<6;i++)arrC.push(col[0],col[1],col[2]);
+/* UV helper */
+const ATLAS_ROWS=16;
+function spriteUVFrame(baseRow,dir,frame){
+  const row=baseRow+dir;
+  return{fU0:frame/4,fU1:(frame+1)/4,fV0:row/ATLAS_ROWS,fV1:(row+1)/ATLAS_ROWS};
 }
-function addBox(arr,arrC,arrN,cx,cy,cz,sx,sy,sz,col){
+const WHITE_UV={u0:0,v0:15/16,u1:16/ATLAS_W,v1:1};
+
+/* ---------- MESH ---------- */
+function addQuad(aV,aC,aN,x1,y1,z1,x2,y2,z2,x3,y3,z3,x4,y4,z4,nx,ny,nz,col){
+  aV.push(x1,y1,z1,x2,y2,z2,x3,y3,z3,x1,y1,z1,x3,y3,z3,x4,y4,z4);
+  aN.push(nx,ny,nz,nx,ny,nz,nx,ny,nz,nx,ny,nz,nx,ny,nz,nx,ny,nz);
+  for(let i=0;i<6;i++)aC.push(col[0],col[1],col[2]);
+}
+function addBox(aV,aC,aN,cx,cy,cz,sx,sy,sz,col){
   const hx=sx/2,hy=sy/2,hz=sz/2;
   const x0=cx-hx,x1=cx+hx,y0=cy-hy,y1=cy+hy,z0=cz-hz,z1=cz+hz;
-  // top
-  addQuad(arr,arrC,arrN,x0,y1,z0,x1,y1,z0,x1,y1,z1,x0,y1,z1,0,1,0,col);
-  // bottom (skip for perf if below ground)
-  // sides
-  addQuad(arr,arrC,arrN,x0,y0,z1,x1,y0,z1,x1,y1,z1,x0,y1,z1,0,0,1,col); // +z
-  addQuad(arr,arrC,arrN,x1,y0,z0,x0,y0,z0,x0,y1,z0,x1,y1,z0,0,0,-1,col); // -z
-  addQuad(arr,arrC,arrN,x1,y0,z1,x1,y0,z0,x1,y1,z0,x1,y1,z1,1,0,0,col); // +x
-  addQuad(arr,arrC,arrN,x0,y0,z0,x0,y0,z1,x0,y1,z1,x0,y1,z0,-1,0,0,col); // -x
+  addQuad(aV,aC,aN,x0,y1,z0,x1,y1,z0,x1,y1,z1,x0,y1,z1,0,1,0,col);
+  addQuad(aV,aC,aN,x0,y0,z1,x1,y0,z1,x1,y1,z1,x0,y1,z1,0,0,1,col);
+  addQuad(aV,aC,aN,x1,y0,z0,x0,y0,z0,x0,y1,z0,x1,y1,z0,0,0,-1,col);
+  addQuad(aV,aC,aN,x1,y0,z1,x1,y0,z0,x1,y1,z0,x1,y1,z1,1,0,0,col);
+  addQuad(aV,aC,aN,x0,y0,z0,x0,y0,z1,x0,y1,z1,x0,y1,z0,-1,0,0,col);
 }
 
-/* ---------- 13. DUNIA: TILE MAP ---------- */
+/* ---------- TILE TYPES ---------- */
+const T={GRASS:0,PATH:1,SAND:2,WATER:3,FLOOR:4,WALL:5,DOOR:6};
+
+/* ---------- WORLD ---------- */
 const ground=new Uint8Array(MAP_W*MAP_H);
 const solid=new Uint8Array(MAP_W*MAP_H);
 const occupied=new Uint8Array(MAP_W*MAP_H);
 const waterV=new Uint8Array(MAP_W*MAP_H);
-const T={GRASS:0,PATH:1,SAND:2,WATER:3};
+let objects=[];
+let flowers=[];
+let bugs=[];
+let digSpots=[];
+let chunks=[];
 
 function getTile(tx,ty){
   if(tx<0||ty<0||tx>=MAP_W||ty>=MAP_H)return -1;
   return ground[ty*MAP_W+tx];
 }
-function setTile(tx,ty,t){
-  if(tx<0||ty<0||tx>=MAP_W||ty>=MAP_H)return;
-  ground[ty*MAP_W+tx]=t;
+function setTile(tx,ty,t){if(tx<0||ty<0||tx>=MAP_W||ty>=MAP_H)return;ground[ty*MAP_W+tx]=t}
+function isSolid(tx,ty){if(tx<0||ty<0||tx>=MAP_W||ty>=MAP_H)return true;return !!solid[ty*MAP_W+tx]}
+
+function tileHeight(t){
+  if(t===T.WATER)return 0.05;
+  if(t===T.SAND)return 0.12;
+  if(t===T.PATH)return 0.18;
+  if(t===T.FLOOR)return 0.10;
+  if(t===T.WALL)return 1.5;
+  if(t===T.DOOR)return 0.10;
+  return 0.15;
 }
-function isSolid(tx,ty){
-  if(tx<0||ty<0||tx>=MAP_W||ty>=MAP_H)return true;
-  return !!solid[ty*MAP_W+tx];
+function tileColor(tx,ty,t){
+  const n=hash2(tx,ty,7);
+  const sm=Season.grassMod();
+  if(t===T.WATER)return waterV[ty*MAP_W+tx]%2?COL.waterA:COL.waterB;
+  if(t===T.PATH)return n>0.5?COL.pathA:COL.pathB;
+  if(t===T.SAND)return n>0.5?COL.sandA:COL.sandB;
+  if(t===T.FLOOR)return (tx+ty)%2?COL.floorA:COL.floorB;
+  if(t===T.WALL)return COL.inWall;
+  if(t===T.DOOR)return COL.wood;
+  let col=n>0.85?COL.grassC:(n<0.15?COL.grassB:COL.grassA);
+  return[col[0]*sm[0],col[1]*sm[1],col[2]*sm[2]];
 }
 
-let objects=[]; // {x,y,z,kind,tx,ty,hp,...}
-let flowers=[]; // {x,y,color,phase}
-let bugs=[];
-let digSpots=[];
-
-function genWorld(){
+/* ---------- DUNIA: GENERASI ---------- */
+function genVillage(){
   const rng=mulberry32(20240607);
   for(let i=0;i<MAP_W*MAP_H;i++){ground[i]=T.GRASS;solid[i]=0;occupied[i]=0;waterV[i]=0}
-  // paths
   for(let tx=3;tx<=60;tx++){setTile(tx,24,T.PATH);setTile(tx,25,T.PATH)}
   for(let ty=3;ty<=45;ty++){setTile(30,ty,T.PATH);setTile(31,ty,T.PATH)}
   for(let ty=21;ty<=27;ty++)for(let tx=27;tx<=34;tx++)setTile(tx,ty,T.PATH);
-  // water
   for(let ty=0;ty<MAP_H;ty++)for(let tx=0;tx<MAP_W;tx++){
     const dx=(tx-47)/10.5,dy=(ty-11)/6.5;
     const d=dx*dx+dy*dy;
     if(d<=1){setTile(tx,ty,T.WATER);waterV[ty*MAP_W+tx]=(hash2(tx,ty,13)*3)|0}
     else if(d<=1.45&&getTile(tx,ty)===T.GRASS)setTile(tx,ty,T.SAND);
   }
-  // boundary + water solid
   for(let ty=0;ty<MAP_H;ty++)for(let tx=0;tx<MAP_W;tx++){
     const i=ty*MAP_W+tx;
     if(ground[i]===T.WATER)solid[i]=1;
     if(tx===0||ty===0||tx===MAP_W-1||ty===MAP_H-1)solid[i]=1;
   }
-  // house
   const hx=28,hy=20;
-  objects.push({kind:'house',tx:hx,ty:hy,x:hx*TILE,y:0,z:hy*TILE,doorX:hx+0.5,doorY:hy+1});
+  objects.push({kind:'house',tx:hx,ty:hy,x:hx*TILE,y:0,z:hy*TILE,doorX:hx+0.5,doorZ:hy+1});
   for(let ty=hy-2;ty<=hy;ty++)for(let tx=hx-2;tx<=hx+1;tx++){
     if(tx<0||ty<0||tx>=MAP_W||ty>=MAP_H)continue;
     solid[ty*MAP_W+tx]=1;occupied[ty*MAP_W+tx]=1;
   }
-  // shop sign
   objects.push({kind:'sign',tx:34,ty:22,x:34.5,y:0,z:22.5});
-  // trees border
   for(let tx=0;tx<MAP_W;tx++)for(const ty of[0,1,MAP_H-2,MAP_H-1]){
-    if(rng()<0.7&&!isSolid(tx,ty)){addTree(tx,ty,(rng()*3)|0)}
+    if(rng()<0.7&&!isSolid(tx,ty)&&!occupied[ty*MAP_W+tx])addTree(tx,ty,(rng()*3)|0);
   }
   for(let ty=0;ty<MAP_H;ty++)for(const tx of[0,1,MAP_W-2,MAP_W-1]){
-    if(rng()<0.7&&!isSolid(tx,ty)&&!occupied[ty*MAP_W+tx]){addTree(tx,ty,(rng()*3)|0)}
+    if(rng()<0.7&&!isSolid(tx,ty)&&!occupied[ty*MAP_W+tx])addTree(tx,ty,(rng()*3)|0);
   }
-  // random trees
   for(let n=0;n<80;n++){
     const tx=2+((rng()*(MAP_W-4))|0);
     const ty=2+((rng()*(MAP_H-4))|0);
-    if(getTile(tx,ty)===T.GRASS&&!isSolid(tx,ty)&&!occupied[ty*MAP_W+tx]&&rng()<0.55){
-      addTree(tx,ty,(rng()*3)|0);
-    }
+    if(getTile(tx,ty)===T.GRASS&&!isSolid(tx,ty)&&!occupied[ty*MAP_W+tx]&&rng()<0.55)addTree(tx,ty,(rng()*3)|0);
   }
-  // rocks & bushes
   for(let n=0;n<50;n++){
     const tx=2+((rng()*(MAP_W-4))|0);
     const ty=2+((rng()*(MAP_H-4))|0);
     if(getTile(tx,ty)===T.GRASS&&!isSolid(tx,ty)&&!occupied[ty*MAP_W+tx]){
-      if(rng()<0.6){addRock(tx,ty)}else{addBush(tx,ty)}
+      if(rng()<0.6)addRock(tx,ty);else addBush(tx,ty);
     }
   }
-  // flowers
   for(let ty=2;ty<MAP_H-2;ty++)for(let tx=2;tx<MAP_W-2;tx++){
     if(getTile(tx,ty)!==T.GRASS)continue;
     if(rng()<0.05){
-      const c=[0.95,0.6,0.75];
-      const alt=[[0.95,0.6,0.75],[0.97,0.85,0.45],[0.78,0.66,0.94],[0.97,0.63,0.54],[1,1,1]];
-      flowers.push({tx,ty,x:tx+0.5,z:ty+0.5,color:alt[(rng()*5)|0],phase:rng()*6});
+      const alts=[[0.95,0.6,0.75],[0.97,0.85,0.45],[0.78,0.66,0.94],[0.97,0.63,0.54],[1,1,1]];
+      flowers.push({tx,ty,x:tx+0.5,z:ty+0.5,color:alts[(rng()*5)|0]});
       occupied[ty*MAP_W+tx]=1;
     }
   }
-  // clear spawn
   for(let ty=21;ty<=25;ty++)for(let tx=26;tx<=31;tx++){
     if(tx<0||ty<0||tx>=MAP_W||ty>=MAP_H)continue;
     solid[ty*MAP_W+tx]=0;
@@ -612,197 +604,210 @@ function addBush(tx,ty){
   objects.push({kind:'bush',tx,ty,x:tx+0.5,y:0,z:ty+0.5});
 }
 
-/* ---------- 14. CHUNK MESH BUILDING ---------- */
-const CHUNK=16;
-const chunks=[];
-const NUM_CHUNKS_X=Math.ceil(MAP_W/CHUNK);
-const NUM_CHUNKS_Y=Math.ceil(MAP_H/CHUNK);
-function tileHeight(t){
-  if(t===T.WATER)return 0.05;
-  if(t===T.SAND)return 0.12;
-  if(t===T.PATH)return 0.18;
-  return 0.15;
+/* ---------- INTERIOR DATA ---------- */
+const savedVillage={};
+let interiorChunkData=null;
+function genInterior(){
+  // Clear world
+  for(let i=0;i<MAP_W*MAP_H;i++){ground[i]=T.WALL;solid[i]=1;occupied[i]=1;waterV[i]=0}
+  objects=[];flowers=[];
+  const IW=12,IH=10;
+  for(let ty=1;ty<IH-1;ty++)for(let tx=1;tx<IW-1;tx++){
+    const i=ty*MAP_W+tx;
+    ground[i]=T.FLOOR;solid[i]=0;occupied[i]=1;
+  }
+  const doorTX=6,doorTY=IH-1;
+  ground[doorTY*MAP_W+doorTX]=T.DOOR;
+  ground[doorTY*MAP_W+doorTX+1]=T.DOOR;
+  solid[doorTY*MAP_W+doorTX]=0;
+  solid[doorTY*MAP_W+doorTX+1]=0;
+  // Furniture
+  objects.push({kind:'furn_bed',tx:3,ty:2,x:3.5,y:0,z:2.5});
+  objects.push({kind:'furn_table',tx:8,ty:3,x:8.5,y:0,z:3.5});
+  objects.push({kind:'furn_chair',tx:8,ty:4,x:8.5,y:0,z:4.5});
+  objects.push({kind:'furn_plant',tx:9,ty:6,x:9.5,y:0,z:6.5});
+  for(let ty=2;ty<=3;ty++)for(let tx=3;tx<=4;tx++){solid[ty*MAP_W+tx]=1;occupied[ty*MAP_W+tx]=1}
+  for(let ty=3;ty<=4;ty++)for(let tx=8;tx<=8;tx++){solid[ty*MAP_W+tx]=1;occupied[ty*MAP_W+tx]=1}
 }
-function tileColor(tx,ty,t){
-  const n=hash2(tx,ty,7);
-  if(t===T.WATER){
-    return waterV[ty*MAP_W+tx]%2?COL.waterA:COL.waterB;
-  }
-  if(t===T.PATH){
-    return n>0.5?COL.pathA:COL.pathB;
-  }
-  if(t===T.SAND){
-    return n>0.5?COL.sandA:COL.sandB;
-  }
-  if(n>0.85)return COL.grassC;
-  if(n<0.15)return COL.grassB;
-  return COL.grassA;
-}
+
+/* ---------- CHUNK BUILD ---------- */
 function buildChunk(cx,cy){
-  const verts=[],colors=[],norms=[];
+  const aV=[],aC=[],aN=[];
   const x0=cx*CHUNK,y0=cy*CHUNK;
   const x1=Math.min(x0+CHUNK,MAP_W),y1=Math.min(y0+CHUNK,MAP_H);
-  // ground top faces
   for(let ty=y0;ty<y1;ty++)for(let tx=x0;tx<x1;tx++){
     const t=ground[ty*MAP_W+tx];
     const h=tileHeight(t);
     const col=tileColor(tx,ty,t);
-    const z=ty*TILE,zz=z+TILE;
-    const x=tx*TILE,xx=x+TILE;
-    addQuad(verts,colors,norms,x,h,z,xx,h,z,xx,h,zz,x,h,zz,0,1,0,col);
+    const z=ty*TILE,zz=z+TILE,x=tx*TILE,xx=x+TILE;
+    if(t===T.WALL){
+      addBox(aV,aC,aN,x+0.5,h/2,z+0.5,1,h,1,col);
+      addBox(aV,aC,aN,x+0.5,h+0.15,z+0.5,1.05,0.3,1.05,COL.inWallTop);
+    }else{
+      addQuad(aV,aC,aN,x,h,z,xx,h,z,xx,h,zz,x,h,zz,0,1,0,col);
+    }
   }
-  // ground side faces (boundary between tiles with different heights)
   for(let ty=y0;ty<y1;ty++)for(let tx=x0;tx<x1;tx++){
     const t=ground[ty*MAP_W+tx];
+    if(t===T.WALL)continue;
     const h=tileHeight(t);
-    const col=[tileColor(tx,ty,t)[0]*0.8,tileColor(tx,ty,t)[1]*0.8,tileColor(tx,ty,t)[2]*0.8];
-    // check neighbors
-    const nx=getTile(tx+1,ty);
-    const nz=getTile(tx,ty+1);
-    const px=getTile(tx-1,ty);
-    const pz=getTile(tx,ty-1);
-    const nh=0.15;
-    if(nx>=0&&tileHeight(nx)<h-0.001){
+    const base=tileColor(tx,ty,t);
+    const col=[base[0]*0.8,base[1]*0.8,base[2]*0.8];
+    const nx=getTile(tx+1,ty),nz=getTile(tx,ty+1),px=getTile(tx-1,ty),pz=getTile(tx,ty-1);
+    if(nx>=0&&nx!==T.WALL&&tileHeight(nx)<h-0.001){
       const x=tx*TILE+TILE,z=ty*TILE,zz=z+TILE;
-      addQuad(verts,colors,norms,x,h,z,x,tileHeight(nx),z,x,tileHeight(nx),zz,x,h,zz,1,0,0,col);
+      addQuad(aV,aC,aN,x,h,z,x,tileHeight(nx),z,x,tileHeight(nx),zz,x,h,zz,1,0,0,col);
     }
-    if(nz>=0&&tileHeight(nz)<h-0.001){
+    if(nz>=0&&nz!==T.WALL&&tileHeight(nz)<h-0.001){
       const z=ty*TILE+TILE,x=tx*TILE,xx=x+TILE;
-      addQuad(verts,colors,norms,x,h,z,xx,h,z,xx,tileHeight(nz),z,x,tileHeight(nz),z,0,0,1,col);
-    }
-    if(px>=0&&tileHeight(px)<h-0.001){
-      const x=tx*TILE,z=ty*TILE,zz=z+TILE;
-      addQuad(verts,colors,norms,x,h,z,x,tileHeight(px),z,x,tileHeight(px),zz,x,h,zz,-1,0,0,col);
-    }
-    if(pz>=0&&tileHeight(pz)<h-0.001){
-      const z=ty*TILE,x=tx*TILE,xx=x+TILE;
-      addQuad(verts,colors,norms,x,h,z,xx,h,z,xx,tileHeight(pz),z,x,tileHeight(pz),z,0,0,-1,col);
+      addQuad(aV,aC,aN,x,h,z,xx,h,z,xx,tileHeight(nz),z,x,tileHeight(nz),z,0,0,1,col);
     }
   }
-  // objects in chunk (they stick up from ground)
   for(let i=0;i<objects.length;i++){
     const o=objects[i];
     if(o.tx<x0||o.tx>=x1||o.ty<y0||o.ty>=y1)continue;
     const bx=o.tx*TILE+TILE/2,bz=o.ty*TILE+TILE/2;
     const gy=tileHeight(ground[o.ty*MAP_W+o.tx]);
-    if(o.kind==='tree')buildTree(verts,colors,norms,bx,gy,bz,o.v||0);
-    else if(o.kind==='rock')buildRock(verts,colors,norms,bx,gy,bz);
-    else if(o.kind==='bush')buildBush(verts,colors,norms,bx,gy,bz);
-    else if(o.kind==='house')buildHouse(verts,colors,norms,o.tx*TILE,(o.ty-2)*TILE);
-    else if(o.kind==='sign')buildSign(verts,colors,norms,bx,gy,bz);
+    const lm=Season.leafMod();
+    const leafA=[COL.leafA[0]*lm[0],COL.leafA[1]*lm[1],COL.leafA[2]*lm[2]];
+    const leafB=[COL.leafB[0]*lm[0],COL.leafB[1]*lm[1],COL.leafB[2]*lm[2]];
+    const leafC=[COL.leafC[0]*lm[0],COL.leafC[1]*lm[1],COL.leafC[2]*lm[2]];
+    if(o.kind==='tree')buildTree(aV,aC,aN,bx,gy,bz,o.v||0,leafA,leafB,leafC);
+    else if(o.kind==='rock')buildRock(aV,aC,aN,bx,gy,bz);
+    else if(o.kind==='bush')buildBush(aV,aC,aN,bx,gy,bz,leafA,leafB);
+    else if(o.kind==='house')buildHouse(aV,aC,aN,o.tx*TILE,(o.ty-2)*TILE);
+    else if(o.kind==='sign')buildSign(aV,aC,aN,bx,gy,bz);
+    else if(o.kind==='furn_bed')buildBed(aV,aC,aN,bx,gy,bz);
+    else if(o.kind==='furn_table')buildTable(aV,aC,aN,bx,gy,bz);
+    else if(o.kind==='furn_chair')buildChair(aV,aC,aN,bx,gy,bz);
+    else if(o.kind==='furn_plant')buildPotPlant(aV,aC,aN,bx,gy,bz,leafA,leafB);
+    else if(o.kind==='grow')buildGrow(aV,aC,aN,bx,gy,bz,o,leafA,leafB,leafC);
+    else if(o.kind==='stump')buildStump(aV,aC,aN,bx,gy,bz);
   }
-  // flowers as tiny meshes
   for(let i=0;i<flowers.length;i++){
     const f=flowers[i];
     if(f.tx<x0||f.tx>=x1||f.ty<y0||f.ty>=y1)continue;
     const gy=tileHeight(ground[f.ty*MAP_W+f.tx]);
-    addBox(verts,colors,norms,f.x,gy+0.15,f.z,0.15,0.15,0.15,f.color);
+    addBox(aV,aC,aN,f.x,gy+0.15,f.z,0.15,0.15,0.15,f.color);
   }
-  return {verts,colors,norms,x0,y0,x1,y1};
+  return{aV,aC,aN,x0,y0,x1,y1};
 }
-function buildTree(v,cols,norms,x,gy,z){
-  // trunk
+function buildTree(v,cols,norms,x,gy,z,varId,leafA,leafB,leafC){
   addBox(v,cols,norms,x,gy+0.9,z,0.35,1.8,0.35,COL.trunk);
-  // foliage (cluster of boxes)
-  const baseY=gy+2.0;
-  addBox(v,cols,norms,x,baseY+0.3,z,1.4,0.9,1.4,COL.leafA);
-  addBox(v,cols,norms,x,baseY+1.1,z,1.2,0.8,1.2,COL.leafB);
-  addBox(v,cols,norms,x,baseY+1.9,z,0.9,0.8,0.9,COL.leafC);
-  addBox(v,cols,norms,x,baseY+2.5,z,0.5,0.5,0.5,COL.leafC);
-  // fruit dots
-  if(v===1){
-    addBox(v,cols,norms,x+0.4,baseY+0.9,z-0.2,0.2,0.2,0.2,[0.95,0.63,0.63]);
-    addBox(v,cols,norms,x-0.3,baseY+1.5,z+0.2,0.2,0.2,0.2,[0.95,0.63,0.63]);
+  const bY=gy+2.0;
+  addBox(v,cols,norms,x,bY+0.3,z,1.4,0.9,1.4,leafA);
+  addBox(v,cols,norms,x,bY+1.1,z,1.2,0.8,1.2,leafB);
+  addBox(v,cols,norms,x,bY+1.9,z,0.9,0.8,0.9,leafC);
+  addBox(v,cols,norms,x,bY+2.5,z,0.5,0.5,0.5,leafC);
+  if(varId===1){
+    addBox(v,cols,norms,x+0.4,bY+0.9,z-0.2,0.2,0.2,0.2,[0.95,0.63,0.63]);
+    addBox(v,cols,norms,x-0.3,bY+1.5,z+0.2,0.2,0.2,0.2,[0.95,0.63,0.63]);
   }
 }
-function buildRock(v,cols,norms,x,gy,z){
-  addBox(v,cols,norms,x,gy+0.35,z,0.85,0.7,0.85,COL.rock);
-  addBox(v,cols,norms,x+0.15,gy+0.8,z+0.1,0.55,0.35,0.55,COL.rockD);
+function buildGrow(v,c,n,x,gy,z,o,leafA,leafB,leafC){
+  const s=o.stage||0;
+  if(s===0){
+    addBox(v,c,n,x,gy+0.12,z,0.15,0.24,0.15,[0.4,0.7,0.3]);
+  }else if(s===1){
+    addBox(v,c,n,x,gy+0.35,z,0.2,0.7,0.2,COL.trunk);
+    addBox(v,c,n,x,gy+0.8,z,0.5,0.5,0.5,leafA);
+  }else if(s===2){
+    addBox(v,c,n,x,gy+0.7,z,0.3,1.4,0.3,COL.trunk);
+    addBox(v,c,n,x,gy+1.7,z,0.9,0.9,0.9,leafB);
+  }else{
+    buildTree(v,c,n,x,gy,z,o.variant||0,leafA,leafB,leafC);
+  }
 }
-function buildBush(v,cols,norms,x,gy,z){
-  addBox(v,cols,norms,x,gy+0.35,z,0.75,0.7,0.75,COL.leafA);
-  addBox(v,cols,norms,x,gy+0.7,z,0.55,0.35,0.55,COL.leafB);
+function buildStump(v,c,n,x,gy,z){
+  addBox(v,c,n,x,gy+0.2,z,0.5,0.4,0.5,COL.trunkD);
+  addBox(v,c,n,x,gy+0.42,z,0.42,0.04,0.42,COL.trunk);
 }
-function buildHouse(v,cols,norms,x,z){
+function buildRock(v,c,n,x,gy,z){
+  addBox(v,c,n,x,gy+0.35,z,0.85,0.7,0.85,COL.rock);
+  addBox(v,c,n,x+0.15,gy+0.8,z+0.1,0.55,0.35,0.55,COL.rockD);
+}
+function buildBush(v,c,n,x,gy,z,leafA,leafB){
+  addBox(v,c,n,x,gy+0.35,z,0.75,0.7,0.75,leafA);
+  addBox(v,c,n,x,gy+0.7,z,0.55,0.35,0.55,leafB);
+}
+function buildHouse(v,c,n,x,z){
   const w=4,h=3,d=4;
-  // walls
-  addBox(v,cols,norms,x+w/2,0.15+h/2,z+d/2,w,h,d,COL.wall);
-  // wall bottom (wood)
-  addBox(v,cols,norms,x+w/2,0.4,z+d/2,w*1.02,0.5,d*1.02,COL.wallD);
-  // door
-  addBox(v,cols,norms,x+w/2,0.5+0.9,z+d,0.9,1.8,0.1,COL.door);
-  // windows
-  addBox(v,cols,norms,x+0.9,2.0,z+d,0.8,0.8,0.1,COL.glass);
-  addBox(v,cols,norms,x+w-0.9,2.0,z+d,0.8,0.8,0.1,COL.glass);
-  // roof (pyramid-ish)
-  addBox(v,cols,norms,x+w/2,0.15+h+0.4,z+d/2,w+0.6,0.8,d+0.6,COL.roof);
-  addBox(v,cols,norms,x+w/2,0.15+h+1.0,z+d/2,w-0.2,0.6,d-0.2,COL.roofD);
-  addBox(v,cols,norms,x+w/2,0.15+h+1.4,z+d/2,w-1.4,0.4,d-1.4,COL.roof);
+  addBox(v,c,n,x+w/2,0.15+h/2,z+d/2,w,h,d,COL.wall);
+  addBox(v,c,n,x+w/2,0.4,z+d/2,w*1.02,0.5,d*1.02,COL.wallD);
+  addBox(v,c,n,x+w/2,0.5+0.9,z+d,0.9,1.8,0.1,COL.door);
+  addBox(v,c,n,x+0.9,2.0,z+d,0.8,0.8,0.1,COL.glass);
+  addBox(v,c,n,x+w-0.9,2.0,z+d,0.8,0.8,0.1,COL.glass);
+  addBox(v,c,n,x+w/2,0.15+h+0.4,z+d/2,w+0.6,0.8,d+0.6,COL.roof);
+  addBox(v,c,n,x+w/2,0.15+h+1.0,z+d/2,w-0.2,0.6,d-0.2,COL.roofD);
+  addBox(v,c,n,x+w/2,0.15+h+1.4,z+d/2,w-1.4,0.4,d-1.4,COL.roof);
 }
-function buildSign(v,cols,norms,x,gy,z){
-  addBox(v,cols,norms,x,gy+1.2,z,0.15,2.4,0.15,COL.woodD);
-  addBox(v,cols,norms,x,gy+2.0,z,1.2,0.7,0.15,COL.wood);
-  addBox(v,cols,norms,x,gy+1.9,z-0.1,0.8,0.15,0.05,[1.0,0.81,0.42]);
+function buildSign(v,c,n,x,gy,z){
+  addBox(v,c,n,x,gy+1.2,z,0.15,2.4,0.15,COL.woodD);
+  addBox(v,c,n,x,gy+2.0,z,1.2,0.7,0.15,COL.wood);
+  addBox(v,c,n,x,gy+1.9,z-0.1,0.8,0.15,0.05,[1.0,0.81,0.42]);
+}
+function buildBed(v,c,n,x,gy,z){
+  addBox(v,c,n,x,gy+0.25,z,1.6,0.5,1.0,[0.55,0.36,0.22]);
+  addBox(v,c,n,x,gy+0.55,z,1.55,0.15,0.95,COL.bed);
+  addBox(v,c,n,x-0.5,gy+0.6,z,0.55,0.2,0.9,COL.bedSheet);
+}
+function buildTable(v,c,n,x,gy,z){
+  addBox(v,c,n,x,gy+0.4,z,1.2,0.6,1.2,COL.tableW);
+  addBox(v,c,n,x,gy+0.72,z,1.25,0.06,1.25,[0.85,0.7,0.5]);
+}
+function buildChair(v,c,n,x,gy,z){
+  addBox(v,c,n,x,gy+0.3,z,0.6,0.6,0.6,COL.chairW);
+  addBox(v,c,n,x,gy+0.65,z-0.2,0.55,0.5,0.1,[0.45,0.32,0.20]);
+}
+function buildPotPlant(v,c,n,x,gy,z,leafA,leafB){
+  addBox(v,c,n,x,gy+0.2,z,0.5,0.4,0.5,COL.woodD);
+  addBox(v,c,n,x,gy+0.55,z,0.6,0.5,0.6,leafA);
+  addBox(v,c,n,x,gy+0.95,z,0.4,0.4,0.4,leafB);
+}
+
+/* ---------- CHUNKS ---------- */
+function uploadChunkBuffers(data){
+  if(data.aV.length===0)return null;
+  const posBuf=gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER,posBuf);
+  gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(data.aV),gl.STATIC_DRAW);
+  const colBuf=gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER,colBuf);
+  gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(data.aC),gl.STATIC_DRAW);
+  const nrmBuf=gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER,nrmBuf);
+  gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(data.aN),gl.STATIC_DRAW);
+  return{posBuf,colBuf,nrmBuf,count:data.aV.length/3};
+}
+function freeChunks(){
+  for(const ch of chunks){
+    if(ch){gl.deleteBuffer(ch.posBuf);gl.deleteBuffer(ch.colBuf);gl.deleteBuffer(ch.nrmBuf)}
+  }
+  chunks.length=0;
 }
 function buildAllChunks(){
-  chunks.length=0;
-  for(let cy=0;cy<NUM_CHUNKS_Y;cy++)for(let cx=0;cx<NUM_CHUNKS_X;cx++){
+  freeChunks();
+  for(let cy=0;cy<NUM_CY;cy++)for(let cx=0;cx<NUM_CX;cx++){
     const data=buildChunk(cx,cy);
-    if(data.verts.length===0){chunks.push(null);continue}
-    const posBuf=gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER,posBuf);
-    gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(data.verts),gl.STATIC_DRAW);
-    const colBuf=gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER,colBuf);
-    gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(data.colors),gl.STATIC_DRAW);
-    const nrmBuf=gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER,nrmBuf);
-    gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(data.norms),gl.STATIC_DRAW);
-    chunks.push({posBuf,colBuf,nrmBuf,count:data.verts.length/3,meta:data});
+    chunks.push(uploadChunkBuffers(data));
   }
+}
+function rebuildAllChunks(){
+  buildAllChunks();
+}
+function rebuildChunk(cx,cy){
+  if(cx<0||cy<0||cx>=NUM_CX||cy>=NUM_CY)return;
+  const i=cy*NUM_CX+cx;
+  const old=chunks[i];
+  if(old){gl.deleteBuffer(old.posBuf);gl.deleteBuffer(old.colBuf);gl.deleteBuffer(old.nrmBuf)}
+  const data=buildChunk(cx,cy);
+  chunks[i]=uploadChunkBuffers(data);
 }
 
-/* ---------- 15. BILLBOARD BUFFER ---------- */
-let bbPosBuf=null,bbUVBuf=null,bbCSBuf=null,bbTintBuf=null;
-let bbCount=0;
-const bbVerts=[],bbUVs=[],bbCSs=[],bbTints=[];
-function resetBillboards(){
-  bbVerts.length=0;bbUVs.length=0;bbCSs.length=0;bbTints.length=0;
-  bbCount=0;
-}
-function addBillboard(cx,cy,cz,size,u0,v0,u1,v1,tint){
-  // two triangles
-  const corners=[[-0.5,-0.5,u0,v0],[0.5,-0.5,u1,v0],[0.5,0.5,u1,v1],[-0.5,0.5,u0,v1]];
-  const idx=[0,1,2,0,2,3];
-  for(let i=0;i<6;i++){
-    const c=corners[idx[i]];
-    bbVerts.push(c[0],c[1]);
-    bbUVs.push(c[2],c[3]);
-    bbCSs.push(cx,cy,cz,size);
-    bbTints.push(tint[0],tint[1],tint[2],tint[3]);
-  }
-  bbCount++;
-}
-function uploadBillboards(){
-  if(!bbPosBuf){
-    bbPosBuf=gl.createBuffer();bbUVBuf=gl.createBuffer();
-    bbCSBuf=gl.createBuffer();bbTintBuf=gl.createBuffer();
-  }
-  gl.bindBuffer(gl.ARRAY_BUFFER,bbPosBuf);
-  gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(bbVerts),gl.DYNAMIC_DRAW);
-  gl.bindBuffer(gl.ARRAY_BUFFER,bbUVBuf);
-  gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(bbUVs),gl.DYNAMIC_DRAW);
-  gl.bindBuffer(gl.ARRAY_BUFFER,bbCSBuf);
-  gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(bbCSs),gl.DYNAMIC_DRAW);
-  gl.bindBuffer(gl.ARRAY_BUFFER,bbTintBuf);
-  gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(bbTints),gl.DYNAMIC_DRAW);
-}
-
-/* ---------- 16. COLLISION ---------- */
-const PLAYER_HW=0.35,PLAYER_HH=0.4;
+/* ---------- COLLISION ---------- */
+const P_HW=0.35,P_HH=0.4;
 function collides(px,pz,hw,hh){
-  const bx=px-hw,bz=px-hh;
-  const bx2=px+hw,bz2=pz+hh;
+  const bx=px-hw,bz=pz-hh,bx2=px+hw,bz2=pz+hh;
   const tx0=Math.floor(bx),tx1=Math.floor(bx2);
   const ty0=Math.floor(bz),ty1=Math.floor(bz2);
   for(let ty=ty0;ty<=ty1;ty++)for(let tx=tx0;tx<=tx1;tx++){
@@ -815,16 +820,14 @@ function tryMove(ent,dx,dz,hw,hh){
   if(dz!==0&&!collides(ent.x,ent.z+dz,hw,hh))ent.z+=dz;
 }
 
-/* ---------- 17. NPC ---------- */
+/* ---------- NPC ---------- */
 function makeNPC(def){
-  const baseRow=4+NPC_DEFS.indexOf(def)*4;
-  return {
+  return{
     def,name:def.name,personality:def.personality,
-    x:def.spawnX,z:def.spawnY,
-    homeX:def.spawnX,homeZ:def.spawnY,
+    x:def.spawnX,z:def.spawnZ,homeX:def.spawnX,homeZ:def.spawnZ,
     dir:'down',frame:0,animT:0,
     state:'idle',timer:1+Math.random()*2,
-    affinity:0,baseRow,
+    affinity:0,
     getGreet(){
       const t=this.affinity>=3?'f':(this.affinity>=1?'a':'s');
       const pool=this.def.greet[t];
@@ -833,33 +836,48 @@ function makeNPC(def){
   };
 }
 function updateNPCs(dt){
+  const phase=TimeSys.phase().toLowerCase();
   for(const npc of npcs){
     if(dialog.active&&dialog.npc===npc)continue;
     npc.timer-=dt;
+    const sched=npc.def.sched?npc.def.sched[phase]:null;
+    const targetX=sched?sched[0]:npc.homeX;
+    const targetZ=sched?sched[1]:npc.homeZ;
+    const ddx=npc.x-targetX,ddz=npc.z-targetZ;
+    const dhome=Math.sqrt(ddx*ddx+ddz*ddz);
+    // If far from schedule target, walk towards it
+    if(dhome>2.5&&npc.state!=='arrive'){
+      npc.state='arrive';
+      const l=dhome||1;
+      const sp=NPC_SPEED*dt;
+      const ox=npc.x,oz=npc.z;
+      tryMove(npc,-ddx/l*sp,-ddz/l*sp,0.35,0.4);
+      if(Math.abs(ddx)>Math.abs(ddz))npc.dir=ddx>0?'left':'right';
+      else npc.dir=ddz>0?'up':'down';
+      npc.animT+=dt;
+      npc.frame=Math.floor(npc.animT*6)%4;
+      if(Math.abs(npc.x-ox)<0.001&&Math.abs(npc.z-oz)<0.001){npc.timer=0;npc.state='idle'}
+      continue;
+    }
+    if(npc.state==='arrive')npc.state='idle';
     if(npc.state==='idle'){
       if(npc.timer<=0){
         const r=Math.random();
         if(r<0.6){
           npc.state='walk';npc.timer=1.5+Math.random()*2.5;
           npc.dir=['down','up','left','right'][(Math.random()*4)|0];
-        }else{npc.timer=1.5+Math.random()*2.5}
+        }else npc.timer=1.5+Math.random()*2.5;
       }
       npc.frame=0;
     }else{
-      const dx=npc.x-npc.homeX,dz=npc.z-npc.homeZ;
-      const dh=Math.sqrt(dx*dx+dz*dz);
       let mx=0,mz=0;
-      if(dh>4){mx=-Math.sign(dx);mz=-Math.sign(dz)}
-      else{
-        if(npc.dir==='down')mz=1;
-        else if(npc.dir==='up')mz=-1;
-        else if(npc.dir==='left')mx=-1;
-        else mx=1;
-      }
-      const l=Math.sqrt(mx*mx+mz*mz)||1;
+      if(npc.dir==='down')mz=1;
+      else if(npc.dir==='up')mz=-1;
+      else if(npc.dir==='left')mx=-1;
+      else mx=1;
       const sp=NPC_SPEED*dt;
       const ox=npc.x,oz=npc.z;
-      tryMove(npc,mx/l*sp,mz/l*sp,0.35,0.4);
+      tryMove(npc,mx*sp,mz*sp,0.35,0.4);
       if(Math.abs(npc.x-ox)<0.001&&Math.abs(npc.z-oz)<0.001)npc.timer=0;
       npc.animT+=dt;
       npc.frame=Math.floor(npc.animT*6)%4;
@@ -868,20 +886,19 @@ function updateNPCs(dt){
   }
 }
 
-/* ---------- 18. DIALOG ---------- */
+/* ---------- DIALOG ---------- */
 const dialog={active:false,npc:null,lines:[],idx:0,full:'',text:'',t:0,done:false};
-function startDialog(npc){
-  dialog.active=true;dialog.npc=npc;
-  dialog.lines=[npc.getGreet()];dialog.idx=0;
-  dialog.full=dialog.lines[0];dialog.text='';dialog.t=0;dialog.done=false;
-  face(npc,player.x,player.z);
-  face(player,npc.x,npc.z);
-  Audio.sfx('dialog');
-}
 function face(ent,tx,tz){
   const dx=tx-ent.x,dz=tz-ent.z;
   if(Math.abs(dx)>Math.abs(dz))ent.dir=dx>0?'right':'left';
   else ent.dir=dz>0?'down':'up';
+}
+function startDialog(npc){
+  dialog.active=true;dialog.npc=npc;
+  dialog.lines=[npc.getGreet()];dialog.idx=0;
+  dialog.full=dialog.lines[0];dialog.text='';dialog.t=0;dialog.done=false;
+  face(npc,player.x,player.z);face(player,npc.x,npc.z);
+  Audio.sfx('dialog');
 }
 function advanceDialog(){
   if(!dialog.active)return;
@@ -899,57 +916,44 @@ function updateDialog(dt){
   if(n>=dialog.full.length){dialog.text=dialog.full;dialog.done=true}
   else dialog.text=dialog.full.substring(0,n);
 }
-function npcReact(npc,itemId){
-  const item=ITEMS[itemId];
-  if(!item)return'HMM?';
-  const s=(item.gift||1)+npc.affinity;
+function npcReact(npc,id){
+  const it=ITEMS[id];if(!it)return'HMM?';
+  const s=(it.gift||1)+npc.affinity;
   if(npc.personality==='cheerful')return s>=5?'WAAAH! MAKASIH YA~':(s>=3?'TERIMA KASIH! AKU SUKA.':'HEHE MAKASIH!');
   if(npc.personality==='gruff')return s>=5?'HMM... BAGUS. MAKASIH.':(s>=3?'OH... MAKASIH.':'MAKASIH YA.');
   if(npc.personality==='sleepy')return s>=5?'NYAA~ MAKASIH...':(s>=3?'NYA... MAKASIH...':'NYA~');
   return s>=5?'ADUH MANIS! MAKASIH SAYANG~':(s>=3?'IH MAKASIH!':'MAKASIH SAYANG.');
 }
 function giveGift(idx){
-  const slot=inv.slots[idx];
-  if(!slot)return false;
+  const slot=inv.slots[idx];if(!slot)return false;
   if(ITEMS[slot.id].isTool){message.show('TIDAK BISA MEMBERI ALAT',1.5);Audio.sfx('error');return false}
   const npc=dialog.npc;if(!npc)return false;
   const r=npcReact(npc,slot.id);
-  inv.removeAt(idx,1);
-  npc.affinity=Math.min(10,npc.affinity+1);
+  inv.removeAt(idx,1);npc.affinity=Math.min(10,npc.affinity+1);
   dialog.lines=[r];dialog.idx=0;dialog.full=r;dialog.text='';dialog.t=0;dialog.done=false;
   invUI.open=false;invUI.mode='normal';
-  Audio.sfx('gift');
-  return true;
+  Audio.sfx('gift');return true;
 }
 
-/* ---------- 19. MEMANCING ---------- */
-const FISH_TABLE=[
-  {id:'ikan_kecil',w:45,h0:0,h1:24},
-  {id:'ikan_sedang',w:30,h0:6,h1:22},
-  {id:'ikan_besar',w:10,h0:10,h1:18},
-  {id:'udang',w:15,h0:18,h1:6}
-];
+/* ---------- PANCING ---------- */
+const FISH=[{id:'ikan_kecil',w:45,h0:0,h1:24},{id:'ikan_sedang',w:30,h0:6,h1:22},{id:'ikan_besar',w:10,h0:10,h1:18},{id:'udang',w:15,h0:18,h1:6}];
 function pickFish(){
-  const h=TimeSys.hour;
-  let tot=0;const avail=[];
-  for(const f of FISH_TABLE){
+  const h=TimeSys.hour;let tot=0;const av=[];
+  for(const f of FISH){
     const ok=f.h0<f.h1?(h>=f.h0&&h<f.h1):(h>=f.h0||h<f.h1);
-    if(ok){avail.push(f);tot+=f.w}
+    if(ok){av.push(f);tot+=f.w}
   }
-  if(!avail.length)return'ikan_kecil';
+  if(!av.length)return'ikan_kecil';
   let r=Math.random()*tot;
-  for(const f of avail){r-=f.w;if(r<=0)return f.id}
-  return avail[avail.length-1].id;
+  for(const f of av){r-=f.w;if(r<=0)return f.id}
+  return av[av.length-1].id;
 }
 function findFishSpot(){
   let tx=Math.floor(player.x),tz=Math.floor(player.z);
   let dx=0,dz=0;
-  if(player.dir==='down')dz=1;else if(player.dir==='up')dz=-1;
-  else if(player.dir==='left')dx=-1;else dx=1;
+  if(player.dir==='down')dz=1;else if(player.dir==='up')dz=-1;else if(player.dir==='left')dx=-1;else dx=1;
   for(let r=1;r<=2;r++){
-    if(getTile(tx+dx*r,tz+dz*r)===T.WATER){
-      return{x:(tx+dx*r)*TILE+0.5,z:(tz+dz*r)*TILE+0.5}
-    }
+    if(getTile(tx+dx*r,tz+dz*r)===T.WATER)return{x:(tx+dx*r)+0.5,z:(tz+dz*r)+0.5}
   }
   return null;
 }
@@ -966,60 +970,44 @@ function startFishing(){
 function updateFishing(dt){
   if(fishing.state==='idle')return;
   fishing.timer-=dt;
-  if(fishing.state==='casting'){
-    if(fishing.timer<=0){fishing.state='waiting';fishing.timer=fishing.umpan?0.6+Math.random()*1.2:1.5+Math.random()*2.5}
-  }else if(fishing.state==='waiting'){
-    if(fishing.timer<=0){fishing.state='bite';fishing.timer=1.2;Audio.sfx('bite')}
-  }else if(fishing.state==='bite'){
-    if(fishing.timer<=0){fishing.state='idle';message.show('IKAN KABUR...',1.5)}
-  }else if(fishing.state==='minigame'){
+  if(fishing.state==='casting'){if(fishing.timer<=0){fishing.state='waiting';fishing.timer=fishing.umpan?0.6+Math.random()*1.2:1.5+Math.random()*2.5}}
+  else if(fishing.state==='waiting'){if(fishing.timer<=0){fishing.state='bite';fishing.timer=1.2;Audio.sfx('bite')}}
+  else if(fishing.state==='bite'){if(fishing.timer<=0){fishing.state='idle';message.show('IKAN KABUR...',1.5)}}
+  else if(fishing.state==='minigame'){
     fishing.cursor+=fishing.dir*fishing.speed*dt;
     if(fishing.cursor>100){fishing.cursor=100;fishing.dir=-1}
     if(fishing.cursor<0){fishing.cursor=0;fishing.dir=1}
-  }else if(fishing.state==='result'){
-    if(fishing.timer<=0)fishing.state='idle';
-  }
+  }else if(fishing.state==='result'){if(fishing.timer<=0)fishing.state='idle'}
 }
 function fishingPress(){
-  if(fishing.state==='bite'){
-    fishing.state='minigame';fishing.cursor=0;fishing.dir=1;fishing.speed=200+Math.random()*80;
-  }else if(fishing.state==='minigame'){
+  if(fishing.state==='bite'){fishing.state='minigame';fishing.cursor=0;fishing.dir=1;fishing.speed=200+Math.random()*80}
+  else if(fishing.state==='minigame'){
     const ok=fishing.cursor>=35&&fishing.cursor<=65;
-    if(ok){
-      const id=pickFish();
-      inv.add(id,1);
-      fishing.result='DAPAT '+ITEMS[id].name+'!';
-      Collection.mark(id);
-      Audio.sfx('catch');
-    }else{fishing.result='IKAN LEPAS...';Audio.sfx('miss')}
+    if(ok){const id=pickFish();inv.add(id,1);fishing.result='DAPAT '+ITEMS[id].name+'!';Collection.mark(id);Audio.sfx('catch')}
+    else{fishing.result='IKAN LEPAS...';Audio.sfx('miss')}
     fishing.state='result';fishing.timer=1.6;
   }
 }
 
-/* ---------- 20. SERANGGA ---------- */
-const BUG_TABLE=[
-  {id:'kupu',w:50,h0:6,h1:18},
-  {id:'kumbang',w:25,h0:18,h1:6},
-  {id:'belalang',w:25,h0:6,h1:18}
-];
+/* ---------- SERANGGA ---------- */
+const BUGS=[{id:'kupu',w:50,h0:6,h1:18},{id:'kumbang',w:25,h0:18,h1:6},{id:'belalang',w:25,h0:6,h1:18}];
 let bugTimer=5;
 function pickBug(){
-  const h=TimeSys.hour;let tot=0;const avail=[];
-  for(const b of BUG_TABLE){
+  const h=TimeSys.hour;let tot=0;const av=[];
+  for(const b of BUGS){
     const ok=b.h0<b.h1?(h>=b.h0&&h<b.h1):(h>=b.h0||h<b.h1);
-    if(ok){avail.push(b);tot+=b.w}
+    if(ok){av.push(b);tot+=b.w}
   }
-  if(!avail.length)return'kupu';
+  if(!av.length)return'kupu';
   let r=Math.random()*tot;
-  for(const b of avail){r-=b.w;if(r<=0)return b.id}
-  return avail[avail.length-1].id;
+  for(const b of av){r-=b.w;if(r<=0)return b.id}
+  return av[av.length-1].id;
 }
 function spawnBug(){
   if(bugs.length>=5)return;
   for(let t=0;t<8;t++){
-    const ang=Math.random()*Math.PI*2;
-    const dist=2+Math.random()*3;
-    const bx=player.x+Math.cos(ang)*dist,bz=player.z+Math.sin(ang)*dist;
+    const a=Math.random()*Math.PI*2,d=2+Math.random()*3;
+    const bx=player.x+Math.cos(a)*d,bz=player.z+Math.sin(a)*d;
     const tx=Math.floor(bx),ty=Math.floor(bz);
     if(getTile(tx,ty)!==T.GRASS)continue;
     if(isSolid(tx,ty))continue;
@@ -1031,17 +1019,11 @@ function updateBugs(dt){
   if(player.scene!=='world'){bugs.length=0;return}
   bugTimer-=dt;
   if(bugTimer<=0){bugTimer=6+Math.random()*6;if(Math.random()<0.7)spawnBug()}
-  for(let i=bugs.length-1;i>=0;i--){
-    bugs[i].timer-=dt;bugs[i].phase+=dt*3;
-    if(bugs[i].timer<=0)bugs.splice(i,1);
-  }
+  for(let i=bugs.length-1;i>=0;i--){bugs[i].timer-=dt;bugs[i].phase+=dt*3;if(bugs[i].timer<=0)bugs.splice(i,1)}
 }
 function tryCatchBug(){
   let n=null,bd=2.0;
-  for(const b of bugs){
-    const d=Math.hypot(b.x-player.x,b.z-player.z);
-    if(d<bd){bd=d;n=b}
-  }
+  for(const b of bugs){const d=Math.hypot(b.x-player.x,b.z-player.z);if(d<bd){bd=d;n=b}}
   if(!n){message.show('TIDAK ADA SERANGGA',1.2);Audio.sfx('error');return}
   inv.add(n.id,1);Collection.mark(n.id);
   message.show('DAPAT '+ITEMS[n.id].name.toUpperCase()+'!',1.8);
@@ -1049,14 +1031,13 @@ function tryCatchBug(){
   const i=bugs.indexOf(n);if(i>=0)bugs.splice(i,1);
 }
 
-/* ---------- 21. MENGGALI ---------- */
+/* ---------- GALI ---------- */
 let digTimer=8;
 function spawnDig(){
   if(digSpots.length>=3)return;
   for(let t=0;t<8;t++){
-    const ang=Math.random()*Math.PI*2;
-    const dist=3+Math.random()*4;
-    const bx=player.x+Math.cos(ang)*dist,bz=player.z+Math.sin(ang)*dist;
+    const a=Math.random()*Math.PI*2,d=3+Math.random()*4;
+    const bx=player.x+Math.cos(a)*d,bz=player.z+Math.sin(a)*d;
     const tx=Math.floor(bx),ty=Math.floor(bz);
     if(getTile(tx,ty)!==T.GRASS)continue;
     if(isSolid(tx,ty))continue;
@@ -1068,28 +1049,21 @@ function updateDig(dt){
   if(player.scene!=='world'){digSpots.length=0;return}
   digTimer-=dt;
   if(digTimer<=0){digTimer=10+Math.random()*8;spawnDig()}
-  for(let i=digSpots.length-1;i>=0;i--){
-    digSpots[i].timer-=dt;
-    if(digSpots[i].timer<=0)digSpots.splice(i,1);
-  }
+  for(let i=digSpots.length-1;i>=0;i--){digSpots[i].timer-=dt;if(digSpots[i].timer<=0)digSpots.splice(i,1)}
 }
 function tryDig(){
   let n=null,bd=1.5;
-  for(const d of digSpots){
-    const dist=Math.hypot(d.x-player.x,d.z-player.z);
-    if(dist<bd){bd=dist;n=d}
-  }
+  for(const d of digSpots){const dd=Math.hypot(d.x-player.x,d.z-player.z);if(dd<bd){bd=dd;n=d}}
   if(!n){message.show('TIDAK ADA GALIAN',1.2);Audio.sfx('error');return}
-  const r=Math.random();
-  let id;
-  if(r<0.4)id='fosil';else if(r<0.7)id='seed';else if(r<0.9)id='umpan';else id='apel';
+  const r=Math.random();let id;
+  if(r<0.35)id='fosil';else if(r<0.6)id='seed';else if(r<0.8)id='umpan';else id='apel';
   inv.add(id,1);Collection.mark(id);
   message.show('DAPAT '+ITEMS[id].name.toUpperCase()+'!',1.8);
   Audio.sfx('dig');
   const i=digSpots.indexOf(n);if(i>=0)digSpots.splice(i,1);
 }
 
-/* ---------- 22. MENEBANG ---------- */
+/* ---------- TEBANG ---------- */
 function tryChop(){
   let n=null,bd=2.2;
   for(const o of objects){
@@ -1108,92 +1082,152 @@ function tryChop(){
     Audio.sfx('treefall');
     const i=objects.indexOf(n);
     if(i>=0)objects.splice(i,1);
-    // rebuild chunk
-    const cx=Math.floor(n.tx/CHUNK),cy=Math.floor(n.ty/CHUNK);
-    rebuildChunk(cx,cy);
+    // Add stump that grows back
+    objects.push({kind:'stump',tx:n.tx,ty:n.ty,x:n.x,y:0,z:n.z,regrowT:0});
+    rebuildChunk(Math.floor(n.tx/CHUNK),Math.floor(n.ty/CHUNK));
   }else{
     message.show('TEBANG LAGI! ('+n.hp+'X)',1.2);
     inv.add('wood',1);
   }
 }
 
-/* ---------- 23. TANAM ---------- */
+/* ---------- TANAM ---------- */
 function tryPlant(){
-  let si=-1;
-  for(let i=0;i<inv.slots.length;i++){if(inv.slots[i]&&inv.slots[i].id==='seed'){si=i;break}}
+  let si=-1,isTree=false;
+  for(let i=0;i<inv.slots.length;i++){
+    if(inv.slots[i]&&inv.slots[i].id==='seed'){si=i;isTree=false;break}
+    if(inv.slots[i]&&inv.slots[i].id==='seed_pohon'){si=i;isTree=true;break}
+  }
   if(si<0){message.show('TIDAK ADA BIBIT',1.2);Audio.sfx('error');return}
   let tx=Math.floor(player.x),ty=Math.floor(player.z);
   if(player.dir==='down')ty++;else if(player.dir==='up')ty--;
   else if(player.dir==='left')tx--;else tx++;
-  if(getTile(tx,ty)!==T.GRASS){message.show('TIDAK BISA MENANAM DI SINI',1.2);Audio.sfx('error');return}
+  if(getTile(tx,ty)!==T.GRASS||isSolid(tx,ty)){message.show('TIDAK BISA MENANAM DI SINI',1.2);Audio.sfx('error');return}
   inv.removeAt(si,1);
-  const alts=[[0.95,0.6,0.75],[0.97,0.85,0.45],[0.78,0.66,0.94],[0.97,0.63,0.54],[1,1,1]];
-  flowers.push({tx,ty,x:tx+0.5,z:ty+0.5,color:alts[(Math.random()*5)|0],phase:Math.random()*6});
-  message.show('BUNGA DITANAM',1.5);
+  if(isTree){
+    objects.push({kind:'grow',tx,ty,x:tx+0.5,y:0,z:ty+0.5,stage:0,growT:0,variant:(tx+ty)%3});
+    solid[ty*MAP_W+tx]=1;occupied[ty*MAP_W+tx]=1;
+    message.show('BIBIT POHON DITANAM',1.5);
+  }else{
+    const alts=[[0.95,0.6,0.75],[0.97,0.85,0.45],[0.78,0.66,0.94],[0.97,0.63,0.54],[1,1,1]];
+    flowers.push({tx,ty,x:tx+0.5,z:ty+0.5,color:alts[(Math.random()*5)|0]});
+    message.show('BUNGA DITANAM',1.5);
+  }
   Audio.sfx('plant');
-  const cx=Math.floor(tx/CHUNK),cy=Math.floor(ty/CHUNK);
-  rebuildChunk(cx,cy);
+  rebuildChunk(Math.floor(tx/CHUNK),Math.floor(ty/CHUNK));
 }
-
-/* ---------- 24. TOKO ---------- */
-const shop={open:false,tab:0,cursor:0,buy:[{id:'seed',price:10},{id:'umpan',price:5},{id:'apel',price:8}]};
-function sellPrice(id){const it=ITEMS[id];if(!it||it.isTool)return 0;return it.sell||1}
-function shopBuy(){
-  const it=shop.buy[shop.cursor];
-  if(!it)return;
-  if(!money.spend(it.price)){message.show('KEPING TIDAK CUKUP',1.5);Audio.sfx('error');return}
-  inv.add(it.id,1);
-  message.show('BELI '+ITEMS[it.id].name.toUpperCase(),1.5);
-  Audio.sfx('buy');
-}
-function shopSell(){
-  const slot=inv.slots[shop.cursor];
-  if(!slot)return;
-  if(ITEMS[slot.id].isTool){message.show('TIDAK BISA DIJUAL',1.2);Audio.sfx('error');return}
-  const p=sellPrice(slot.id);
-  money.add(p);inv.removeAt(shop.cursor,1);
-  message.show('JUAL +'+p+'K',1.5);
-  Audio.sfx('sell');
-}
-
-/* ---------- 25. KOLEKSI ---------- */
-const Collection={caught:{},mark(id){if(!this.caught[id])this.caught[id]=0;this.caught[id]++},has(id){return!!this.caught[id]},open:false,list:[]};
-function buildCollectionList(){
-  Collection.list=[];
-  for(const id in ITEMS){
-    if(ITEMS[id].cat==='fish'||ITEMS[id].cat==='bug')Collection.list.push(id);
+function updateGrow(dt){
+  for(const o of objects){
+    if(o.kind==='grow'){
+      o.growT=(o.growT||0)+dt;
+      if(o.growT>15&&(o.stage||0)<3){
+        o.stage=(o.stage||0)+1;o.growT=0;
+        rebuildChunk(Math.floor(o.tx/CHUNK),Math.floor(o.ty/CHUNK));
+        if(o.stage===3){
+          // Convert to tree
+          const i=objects.indexOf(o);
+          if(i>=0){
+            objects.splice(i,1);
+            objects.push({kind:'tree',tx:o.tx,ty:o.ty,x:o.x,y:0,z:o.z,hp:3,v:o.variant||0});
+            rebuildChunk(Math.floor(o.tx/CHUNK),Math.floor(o.ty/CHUNK));
+          }
+        }
+      }
+    }else if(o.kind==='stump'){
+      o.regrowT=(o.regrowT||0)+dt;
+      if(o.regrowT>20){
+        const i=objects.indexOf(o);
+        if(i>=0){
+          objects.splice(i,1);
+          objects.push({kind:'tree',tx:o.tx,ty:o.ty,x:o.x,y:0,z:o.z,hp:3,v:(o.tx+o.ty)%3});
+          rebuildChunk(Math.floor(o.tx/CHUNK),Math.floor(o.ty/CHUNK));
+        }
+      }
+    }
   }
 }
 
-/* ---------- 26. AUDIO ---------- */
+/* ---------- INTERIOR ENTER/EXIT ---------- */
+function enterInterior(){
+  if(player.scene==='interior')return;
+  // Save village
+  savedVillage.ground=ground.slice();
+  savedVillage.solid=solid.slice();
+  savedVillage.occupied=occupied.slice();
+  savedVillage.waterV=waterV.slice();
+  savedVillage.objects=objects;
+  savedVillage.flowers=flowers;
+  savedVillage.chunks=chunks;
+  savedVillage.px=player.x;savedVillage.pz=player.z;
+  // Build interior
+  genInterior();
+  buildAllChunks();
+  player.x=6.5;player.z=7.5;
+  player.scene='interior';player.dir='up';
+  camera.dist=6;camera.pitch=0.95;
+  Audio.sfx('enter');
+  message.show('RUMAH',1.2);
+}
+function exitInterior(){
+  if(player.scene!=='interior')return;
+  // Delete interior chunks
+  freeChunks();
+  // Restore village
+  ground.set(savedVillage.ground);
+  solid.set(savedVillage.solid);
+  occupied.set(savedVillage.occupied);
+  waterV.set(savedVillage.waterV);
+  objects=savedVillage.objects;
+  flowers=savedVillage.flowers;
+  chunks=savedVillage.chunks;
+  const house=objects.find(o=>o.kind==='house');
+  if(house){player.x=house.doorX;player.z=house.doorZ+1.5}
+  player.scene='world';player.dir='down';
+  camera.dist=9;camera.pitch=0.85;
+  Audio.sfx('enter');
+  message.show('DESA',1.2);
+}
+
+/* ---------- TOKO ---------- */
+const shop={open:false,tab:0,cursor:0,buy:[{id:'seed',price:10},{id:'seed_pohon',price:25},{id:'umpan',price:5},{id:'apel',price:8}]};
+function sellPrice(id){const it=ITEMS[id];if(!it||it.isTool)return 0;return it.sell||1}
+function shopBuy(){
+  const it=shop.buy[shop.cursor];if(!it)return;
+  if(!money.spend(it.price)){message.show('KEPING TIDAK CUKUP',1.5);Audio.sfx('error');return}
+  inv.add(it.id,1);
+  message.show('BELI '+ITEMS[it.id].name.toUpperCase(),1.5);Audio.sfx('buy');
+}
+function shopSell(){
+  const s=inv.slots[shop.cursor];if(!s)return;
+  if(ITEMS[s.id].isTool){message.show('TIDAK BISA DIJUAL',1.2);Audio.sfx('error');return}
+  const p=sellPrice(s.id);
+  money.add(p);inv.removeAt(shop.cursor,1);
+  message.show('JUAL +'+p+'K',1.5);Audio.sfx('sell');
+}
+
+/* ---------- KOLEKSI ---------- */
+const Collection={caught:{},mark(id){if(!this.caught[id])this.caught[id]=0;this.caught[id]++},has(id){return!!this.caught[id]},open:false,list:[]};
+function buildCollectionList(){
+  Collection.list=[];
+  for(const id in ITEMS)if(ITEMS[id].cat==='fish'||ITEMS[id].cat==='bug')Collection.list.push(id);
+}
+
+/* ---------- AUDIO ---------- */
 const Audio={
   ctx:null,master:null,muted:false,ambTimer:0,ambIdx:0,
-  init(){
-    try{
-      const AC=window.AudioContext||window.webkitAudioContext;
-      if(!AC)return false;
-      this.ctx=new AC();
-      this.master=this.ctx.createGain();
-      this.master.gain.value=0.35;
-      this.master.connect(this.ctx.destination);
-      return true;
-    }catch(e){return false}
-  },
+  init(){try{const AC=window.AudioContext||window.webkitAudioContext;if(!AC)return false;this.ctx=new AC();this.master=this.ctx.createGain();this.master.gain.value=0.35;this.master.connect(this.ctx.destination);return true}catch(e){return false}},
   gesture(){if(this.ctx&&this.ctx.state==='suspended')this.ctx.resume().catch(()=>{})},
   toggle(){this.muted=!this.muted;if(this.master)this.master.gain.value=this.muted?0:0.35;message.show(this.muted?'SUARA MATI':'SUARA HIDUP',1.2)},
   sfx(name){
     if(!this.ctx||this.muted)return;
     const c=this.ctx,t=c.currentTime;
-    const mk=(freq,type,dur,vol,slide)=>{
+    const mk=(f,ty,d,v,sl)=>{
       const o=c.createOscillator(),g=c.createGain();
-      o.type=type||'square';
-      o.frequency.setValueAtTime(freq,t);
-      if(slide)o.frequency.exponentialRampToValueAtTime(Math.max(20,freq*slide),t+dur);
-      g.gain.setValueAtTime(0,t);
-      g.gain.linearRampToValueAtTime(vol||0.1,t+0.01);
-      g.gain.exponentialRampToValueAtTime(0.001,t+dur);
-      o.connect(g);g.connect(this.master);
-      o.start(t);o.stop(t+dur+0.02);
+      o.type=ty||'square';o.frequency.setValueAtTime(f,t);
+      if(sl)o.frequency.exponentialRampToValueAtTime(Math.max(20,f*sl),t+d);
+      g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(v||0.1,t+0.01);
+      g.gain.exponentialRampToValueAtTime(0.001,t+d);
+      o.connect(g);g.connect(this.master);o.start(t);o.stop(t+d+0.02);
     };
     switch(name){
       case'dialog':mk(520,'square',0.06,0.06);break;
@@ -1218,68 +1252,133 @@ const Audio={
     this.ambTimer-=dt;
     if(this.ambTimer<=0){
       this.ambTimer=3.6+Math.random()*1.2;
-      const scale=[261.63,293.66,329.63,392.00,440.00,523.25];
-      const note=scale[this.ambIdx%scale.length];this.ambIdx++;
+      const sc=[261.63,293.66,329.63,392.00,440.00,523.25];
+      const n=sc[this.ambIdx%sc.length];this.ambIdx++;
       const c=this.ctx,t=c.currentTime;
       const o=c.createOscillator(),g=c.createGain();
-      o.type='triangle';o.frequency.setValueAtTime(note,t);
+      o.type='triangle';o.frequency.setValueAtTime(n,t);
       g.gain.setValueAtTime(0,t);
       g.gain.linearRampToValueAtTime(0.05,t+0.4);
       g.gain.exponentialRampToValueAtTime(0.001,t+2.0);
-      o.connect(g);g.connect(this.master);
-      o.start(t);o.stop(t+2.1);
+      o.connect(g);g.connect(this.master);o.start(t);o.stop(t+2.1);
     }
   }
 };
 
-/* ---------- 27. TOUCH CONTROLS ---------- */
+/* ---------- WEATHER 3D PARTICLES ---------- */
+const WX={
+  particles:[],
+  respawn(){
+    this.particles=[];
+    if(Weather.type==='rain'){
+      for(let i=0;i<70;i++){
+        this.particles.push({
+          x:player.x+(Math.random()-0.5)*14,
+          y:2+Math.random()*5,
+          z:player.z+(Math.random()-0.5)*14,
+          vy:8+Math.random()*4,
+          size:0.10
+        });
+      }
+    }else if(Weather.type==='windy'){
+      for(let i=0;i<40;i++){
+        this.particles.push({
+          x:player.x+(Math.random()-0.5)*16,
+          y:0.5+Math.random()*4,
+          z:player.z+(Math.random()-0.5)*16,
+          vx:2.5+Math.random()*2,
+          vz:(Math.random()-0.5)*0.8,
+          ph:Math.random()*6,
+          size:0.14
+        });
+      }
+    }
+  },
+  update(dt){
+    if(Weather.type==='sunny'){this.particles.length=0;return}
+    if(this.particles.length===0)this.respawn();
+    for(const p of this.particles){
+      if(Weather.type==='rain'){
+        p.y-=p.vy*dt;
+        if(p.y<0){
+          p.y=7+Math.random()*3;
+          p.x=player.x+(Math.random()-0.5)*14;
+          p.z=player.z+(Math.random()-0.5)*14;
+        }
+      }else{
+        p.x+=p.vx*dt;
+        p.y+=Math.sin(game.time*3+p.ph)*0.4*dt;
+        if(p.x>player.x+9){
+          p.x=player.x-9;
+          p.z=player.z+(Math.random()-0.5)*16;
+          p.y=0.5+Math.random()*4;
+        }
+      }
+    }
+  }
+};
+
+/* ---------- BILLBOARDS ---------- */
+let bbPosBuf=null,bbUVBuf=null,bbCSBuf=null;
+let bbCount=0;
+const bbVerts=[],bbUVs=[],bbCSs=[];
+const tintStack=[];
+function resetBB(){bbVerts.length=0;bbUVs.length=0;bbCSs.length=0;bbCount=0;tintStack.length=0}
+function addBB(cx,cy,cz,size,u0,v0,u1,v1,tint){
+  tintStack.push(tint);
+  const c=[[-0.5,-0.5,u0,v0],[0.5,-0.5,u1,v0],[0.5,0.5,u1,v1],[-0.5,0.5,u0,v1]];
+  const ix=[0,1,2,0,2,3];
+  for(let i=0;i<6;i++){
+    const p=c[ix[i]];
+    bbVerts.push(p[0],p[1]);
+    bbUVs.push(p[2],p[3]);
+    bbCSs.push(cx,cy,cz,size);
+  }
+  bbCount++;
+}
+function uploadBB(){
+  if(!bbPosBuf){bbPosBuf=gl.createBuffer();bbUVBuf=gl.createBuffer();bbCSBuf=gl.createBuffer()}
+  gl.bindBuffer(gl.ARRAY_BUFFER,bbPosBuf);
+  gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(bbVerts),gl.DYNAMIC_DRAW);
+  gl.bindBuffer(gl.ARRAY_BUFFER,bbUVBuf);
+  gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(bbUVs),gl.DYNAMIC_DRAW);
+  gl.bindBuffer(gl.ARRAY_BUFFER,bbCSBuf);
+  gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(bbCSs),gl.DYNAMIC_DRAW);
+}
+
+/* ---------- TOUCH ---------- */
 const Touch={
-  active:false,axisX:0,axisZ:0,joyId:null,joyStartX:0,joyStartY:0,joyCX:0,joyCY:0,
-  camId:null,camLastX:0,camLastY:0,
-  btnStates:{A:false,B:false,M:false,C:false},
+  active:false,axisX:0,axisZ:0,joyId:null,joySX:0,joySY:0,
+  camId:null,camLX:0,camLY:0,
+  btn:{A:false,B:false,C:false,M:false},
   buttons:[],
   init(){
-    const isTouch=('ontouchstart'in window)||navigator.maxTouchPoints>0;
-    if(!isTouch)return;
+    const isT=('ontouchstart'in window)||navigator.maxTouchPoints>0;
+    if(!isT)return;
     this.active=true;
-    // UI-pixel positions (buttons)
     this.buttons=[
       {id:'A',x:UI_W-42,y:UI_H-42,r:16},
       {id:'B',x:UI_W-72,y:UI_H-30,r:13},
       {id:'C',x:UI_W-30,y:30,r:11},
       {id:'M',x:UI_W-58,y:30,r:11}
     ];
-    // screen coords helper
-    const toUI=(sx,sy)=>{
-      const cw=window.innerWidth,ch=window.innerHeight;
-      const scale=uiScale;
-      return {x:(sx-uiOffX)/scale,y:(sy-uiOffY)/scale};
-    };
+    const toUI=(sx,sy)=>({x:(sx-uiOffX)/uiScale,y:(sy-uiOffY)/uiScale});
     const hit=(ux,uy)=>{
-      for(const b of this.buttons){
-        const d=Math.hypot(ux-b.x,uy-b.y);
-        if(d<b.r+4)return b;
-      }
+      for(const b of this.buttons){if(Math.hypot(ux-b.x,uy-b.y)<b.r+4)return b}
       return null;
     };
-    const joyRegion={x:0,y:UI_H-65,w:65,h:65};
-    const inJoy=(ux,uy)=>ux>=joyRegion.x&&ux<=joyRegion.x+joyRegion.w&&uy>=joyRegion.y&&uy<=joyRegion.y+joyRegion.h;
+    const joyR={x:0,y:UI_H-65,w:65,h:65};
+    const inJoy=(ux,uy)=>ux>=joyR.x&&ux<=joyR.x+joyR.w&&uy>=joyR.y&&uy<=joyR.y+joyR.h;
     window.addEventListener('touchstart',(e)=>{
       Audio.gesture();
       for(const t of e.changedTouches){
         const p=toUI(t.clientX,t.clientY);
-        const btn=hit(p.x,p.y);
-        if(btn){
-          this.pressButton(btn.id);
-        }else if(inJoy(p.x,p.y)){
-          this.joyId=t.identifier;
-          this.joyStartX=p.x;this.joyStartY=p.y;
-          this.joyCX=joyRegion.x+joyRegion.w/2;
-          this.joyCY=joyRegion.y+joyRegion.h/2;
-          this.axisX=0;this.axisZ=0;
+        const b=hit(p.x,p.y);
+        if(b){this.press(b.id)}
+        else if(inJoy(p.x,p.y)){
+          this.joyId=t.identifier;this.joySX=p.x;this.joySY=p.y;this.axisX=0;this.axisZ=0;
         }else if(this.camId===null){
-          this.camId=t.identifier;
-          this.camLastX=t.clientX;this.camLastY=t.clientY;
+          this.camId=t.identifier;this.camLX=t.clientX;this.camLY=t.clientY;
         }
       }
     },{passive:false});
@@ -1287,40 +1386,30 @@ const Touch={
       for(const t of e.changedTouches){
         if(t.identifier===this.joyId){
           const p=toUI(t.clientX,t.clientY);
-          const dx=p.x-this.joyStartX,dy=p.y-this.joyStartY;
-          const r=28;
-          const nx=dx/r,ny=dy/r;
-          this.axisX=Math.max(-1,Math.min(1,nx));
-          this.axisZ=Math.max(-1,Math.min(1,ny));
-          this.joyCX=joyRegion.x+joyRegion.w/2+this.axisX*20;
-          this.joyCY=joyRegion.y+joyRegion.h/2+this.axisZ*20;
+          const dx=p.x-this.joySX,dy=p.y-this.joySY,r=28;
+          this.axisX=Math.max(-1,Math.min(1,dx/r));
+          this.axisZ=Math.max(-1,Math.min(1,dy/r));
         }else if(t.identifier===this.camId){
-          const dx=t.clientX-this.camLastX;
-          const dy=t.clientY-this.camLastY;
-          this.camLastX=t.clientX;this.camLastY=t.clientY;
+          const dx=t.clientX-this.camLX,dy=t.clientY-this.camLY;
+          this.camLX=t.clientX;this.camLY=t.clientY;
           camera.yaw-=dx*0.008;
           camera.pitch=Math.max(0.3,Math.min(1.4,camera.pitch+dy*0.005));
         }
       }
     },{passive:false});
-    const endTouch=(e)=>{
+    const end=(e)=>{
       for(const t of e.changedTouches){
-        if(t.identifier===this.joyId){
-          this.joyId=null;this.axisX=0;this.axisZ=0;
-        }else if(t.identifier===this.camId){
-          this.camId=null;
-        }
+        if(t.identifier===this.joyId){this.joyId=null;this.axisX=0;this.axisZ=0}
+        else if(t.identifier===this.camId){this.camId=null}
       }
-      if(e.touches.length===0){
-        this.btnStates.A=this.btnStates.B=this.btnStates.C=this.btnStates.M=false;
-      }
+      if(e.touches.length===0)this.btn.A=this.btn.B=this.btn.C=this.btn.M=false;
     };
-    window.addEventListener('touchend',endTouch,{passive:false});
-    window.addEventListener('touchcancel',endTouch,{passive:false});
+    window.addEventListener('touchend',end,{passive:false});
+    window.addEventListener('touchcancel',end,{passive:false});
   },
-  pressButton(id){
-    this.btnStates[id]=true;
-    setTimeout(()=>{this.btnStates[id]=false},150);
+  press(id){
+    this.btn[id]=true;
+    setTimeout(()=>{this.btn[id]=false},150);
     if(id==='A')onKey('KeyE');
     else if(id==='B')onKey('KeyI');
     else if(id==='C')onKey('KeyC');
@@ -1328,7 +1417,6 @@ const Touch={
   },
   render(){
     if(!this.active)return;
-    // joystick base
     uctx.strokeStyle='rgba(243,227,200,0.5)';uctx.lineWidth=1;
     uctx.beginPath();uctx.arc(32,UI_H-32,22,0,Math.PI*2);uctx.stroke();
     uctx.fillStyle='rgba(26,20,18,0.55)';
@@ -1337,31 +1425,28 @@ const Touch={
     const ky=UI_H-32+(this.joyId?this.axisZ*14:0);
     uctx.fillStyle='rgba(255,207,107,0.85)';
     uctx.beginPath();uctx.arc(kx,ky,7,0,Math.PI*2);uctx.fill();
-    // buttons
     for(const b of this.buttons){
-      const on=this.btnStates[b.id];
+      const on=this.btn[b.id];
       uctx.fillStyle=on?'rgba(255,207,107,0.7)':'rgba(26,20,18,0.6)';
       uctx.beginPath();uctx.arc(b.x,b.y,b.r,0,Math.PI*2);uctx.fill();
-      uctx.strokeStyle='rgba(243,227,200,0.7)';uctx.lineWidth=1;
+      uctx.strokeStyle='rgba(243,227,200,0.7)';
       uctx.beginPath();uctx.arc(b.x,b.y,b.r,0,Math.PI*2);uctx.stroke();
       drawTextC(b.id,b.x,b.y-3,on?COL.uiBg:COL.uiGold);
     }
   }
 };
 
-/* ---------- 28. INPUT KEYBOARD ---------- */
+/* ---------- INPUT KEYBOARD ---------- */
 const keys={};
 window.addEventListener('keydown',(e)=>{
   if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code))e.preventDefault();
   if(e.repeat)return;
-  keys[e.code]=true;
-  Audio.gesture();
-  onKey(e.code);
+  keys[e.code]=true;Audio.gesture();onKey(e.code);
 });
 window.addEventListener('keyup',(e)=>{keys[e.code]=false});
 window.addEventListener('blur',()=>{for(const k in keys)keys[k]=false});
 
-/* ---------- 29. SAVE / LOAD ---------- */
+/* ---------- SAVE ---------- */
 const Save={
   save(){
     try{
@@ -1394,14 +1479,12 @@ const Save={
       money.amount=typeof d.money==='number'?d.money:100;
       for(let i=0;i<20;i++){
         const s=d.inv[i];
-        if(s&&typeof s.id==='string'&&ITEMS[s.id]&&typeof s.n==='number'&&s.n>0)
-          inv.slots[i]={id:s.id,n:s.n};
+        if(s&&typeof s.id==='string'&&ITEMS[s.id]&&typeof s.n==='number'&&s.n>0)inv.slots[i]={id:s.id,n:s.n};
         else inv.slots[i]=null;
       }
       inv.active=typeof d.active==='number'?Math.max(0,Math.min(4,d.active)):0;
       if(Array.isArray(d.affin)){
-        for(let i=0;i<npcs.length&&i<d.affin.length;i++)
-          npcs[i].affinity=typeof d.affin[i]==='number'?d.affin[i]:0;
+        for(let i=0;i<npcs.length&&i<d.affin.length;i++)npcs[i].affinity=typeof d.affin[i]==='number'?d.affin[i]:0;
       }
       if(d.caught&&typeof d.caught==='object')Collection.caught=d.caught;
       if(d.weather&&typeof d.weather.type==='string'){
@@ -1409,6 +1492,8 @@ const Save={
         Weather.timer=typeof d.weather.timer==='number'?d.weather.timer:120;
       }
       game.tutorial=!!d.tutorial;
+      // If loaded into interior, just load into village at door
+      if(player.scene==='interior')player.scene='world';
       return true;
     }catch(e){return false}
   },
@@ -1421,37 +1506,34 @@ function autoSave(dt){
   if(autoSaveT>=30){autoSaveT=0;Save.save()}
 }
 
-/* ---------- 30. KAMERA ---------- */
-function updateCamera(dt){
+/* ---------- CAMERA ---------- */
+function updateCamera(){
   if(player.scene==='interior'){
-    // simple interior camera
-    camPos.x=player.x;
-    camPos.y=2.5;
-    camPos.z=player.z+4;
-    return;
+    const cy=Math.cos(camera.yaw),sy=Math.sin(camera.yaw);
+    const cp=Math.cos(camera.pitch),sp=Math.sin(camera.pitch);
+    camPos.x=player.x+sy*cp*camera.dist;
+    camPos.y=0.6+sp*camera.dist;
+    camPos.z=player.z+cy*cp*camera.dist;
+  }else{
+    const cy=Math.cos(camera.yaw),sy=Math.sin(camera.yaw);
+    const cp=Math.cos(camera.pitch),sp=Math.sin(camera.pitch);
+    camPos.x=player.x+sy*cp*camera.dist;
+    camPos.y=0.6+sp*camera.dist;
+    camPos.z=player.z+cy*cp*camera.dist;
   }
-  const cy=Math.cos(camera.yaw),sy=Math.sin(camera.yaw);
-  const cp=Math.cos(camera.pitch),sp=Math.sin(camera.pitch);
-  const dist=camera.dist;
-  const targetX=player.x,targetZ=player.z,targetY=0.6;
-  camPos.x=targetX+sy*cp*dist;
-  camPos.y=targetY+sp*dist;
-  camPos.z=targetZ+cy*cp*dist;
 }
-function getViewProj(){
+function getVP(){
   const aspect=glCanvas.width/glCanvas.height;
   const proj=M4.perspective(Math.PI/3,aspect,0.1,80);
   const view=M4.lookAt([camPos.x,camPos.y,camPos.z],[player.x,0.6,player.z],[0,1,0]);
-  // view*proj
   const vp=new Float32Array(16);
   for(let i=0;i<4;i++)for(let j=0;j<4;j++){
-    let s=0;
-    for(let k=0;k<4;k++)s+=proj[k*4+j]*view[i*4+k];
+    let s=0;for(let k=0;k<4;k++)s+=proj[k*4+j]*view[i*4+k];
     vp[i*4+j]=s;
   }
   return vp;
 }
-function getCamRightUp(){
+function getCamRU(){
   const fx=player.x-camPos.x,fy=0.6-camPos.y,fz=player.z-camPos.z;
   const fl=Math.sqrt(fx*fx+fy*fy+fz*fz)||1;
   const fwd=[fx/fl,fy/fl,fz/fl];
@@ -1460,7 +1542,7 @@ function getCamRightUp(){
   return{right:r,up:u};
 }
 
-/* ---------- 31. GAME LOGIC: UPDATE ---------- */
+/* ---------- UPDATE ---------- */
 function updatePlayer(dt){
   if(fishing.state!=='idle'){player.moving=false;player.frame=0;return}
   let x=0,z=0;
@@ -1468,25 +1550,19 @@ function updatePlayer(dt){
   if(keys['KeyD']||keys['ArrowRight'])x+=1;
   if(keys['KeyW']||keys['ArrowUp'])z-=1;
   if(keys['KeyS']||keys['ArrowDown'])z+=1;
-  // touch
   x+=Touch.axisX;z+=Touch.axisZ;
   const len=Math.sqrt(x*x+z*z);
   if(len<0.15){player.moving=false;player.animT=0;player.frame=0;return}
   player.moving=true;
   if(len>1){x/=len;z/=len}
-  // camera-relative movement: forward = camera direction projected to ground
   const cy=Math.cos(camera.yaw),sy=Math.sin(camera.yaw);
-  // camera looks toward player from (sy*dist, ..., cy*dist)
-  // forward = -direction from cam to player in xz = (-sy*cp, -cy*cp) normalized
-  // for simplicity: forward = (-sy, -cy)
   const fx=-sy,fz=-cy;
   const rx=cy,rz=-sy;
   const wx=x*rx+z*fx;
   const wz=x*rz+z*fz;
   const wl=Math.sqrt(wx*wx+wz*wz)||1;
   const sp=SPEED*dt;
-  tryMove(player,wx/wl*sp,wz/wl*sp,PLAYER_HW,PLAYER_HH);
-  // facing
+  tryMove(player,wx/wl*sp,wz/wl*sp,P_HW,P_HH);
   if(Math.abs(wx)>Math.abs(wz))player.dir=wx>0?'right':'left';
   else player.dir=wz>0?'down':'up';
   player.animT+=dt;
@@ -1504,18 +1580,25 @@ function nearShop(){return Math.hypot(34.5-player.x,22.5-player.z)<1.8}
 function nearHouse(){
   for(const o of objects){
     if(o.kind!=='house')continue;
-    if(Math.hypot(o.doorX-player.x,o.doorY-player.z)<1.8)return o;
+    if(Math.hypot(o.doorX-player.x,o.doorZ-player.z)<2.0)return o;
   }
   return null;
 }
+function nearInteriorDoor(){
+  if(player.scene!=='interior')return false;
+  const tx=Math.floor(player.x),tz=Math.floor(player.z);
+  return tz>=8&&(tx===6||tx===7);
+}
 function interact(){
   if(player.scene==='interior'){
-    message.show('TEKAN ESC UNTUK KELUAR',1.2);return;
+    if(nearInteriorDoor()){exitInterior();return}
+    message.show('TIDAK ADA APA-APA',1.0);
+    return;
   }
   const npc=findNearestNPC();
   if(npc){startDialog(npc);return}
   if(nearShop()){shop.open=true;shop.tab=0;shop.cursor=0;Audio.sfx('menu');return}
-  if(nearHouse()){message.show('RUMAH - FITUR SEGERA',1.5);return}
+  if(nearHouse()){enterInterior();return}
   const slot=inv.active_item();
   if(!slot){message.show('TANGAN KOSONG',1.0);return}
   const id=slot.id;
@@ -1523,34 +1606,16 @@ function interact(){
   if(id==='net'){tryCatchBug();return}
   if(id==='shovel'){tryDig();return}
   if(id==='axe'){tryChop();return}
-  if(id==='seed'){tryPlant();return}
+  if(id==='seed'||id==='seed_pohon'){tryPlant();return}
   if(id==='water'){message.show('PENYIRAM DIPAKAI',1.0);return}
   message.show(ITEMS[id].name.toUpperCase()+' DIPAKAI',1.0);
 }
-function rebuildChunk(cx,cy){
-  const idx=cy*NUM_CHUNKS_X+cx;
-  const old=chunks[idx];
-  if(old){
-    gl.deleteBuffer(old.posBuf);gl.deleteBuffer(old.colBuf);gl.deleteBuffer(old.nrmBuf);
-  }
-  const data=buildChunk(cx,cy);
-  if(data.verts.length===0){chunks[idx]=null;return}
-  const posBuf=gl.createBuffer();
-  gl.bindBuffer(gl.ARRAY_BUFFER,posBuf);
-  gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(data.verts),gl.STATIC_DRAW);
-  const colBuf=gl.createBuffer();
-  gl.bindBuffer(gl.ARRAY_BUFFER,colBuf);
-  gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(data.colors),gl.STATIC_DRAW);
-  const nrmBuf=gl.createBuffer();
-  gl.bindBuffer(gl.ARRAY_BUFFER,nrmBuf);
-  gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(data.norms),gl.STATIC_DRAW);
-  chunks[idx]={posBuf,colBuf,nrmBuf,count:data.verts.length/3,meta:data};
-}
 
-/* ---------- 32. UI RENDERING ---------- */
+/* ---------- UI ---------- */
 function renderHUD(){
   panel(4,4,60,13);
-  drawText(player.scene==='interior'?'RUMAH':'DESA',8,7,COL.uiGold);
+  const loc=player.scene==='interior'?'RUMAH':'DESA';
+  drawText(loc,8,7,COL.uiGold);
   const w=Weather.type==='sunny'?'CERAH':(Weather.type==='rain'?'HUJAN':'ANGIN');
   const s=TimeSys.fmt()+' '+w;
   const sw=tw(s)+8;
@@ -1560,30 +1625,29 @@ function renderHUD(){
   const mw=tw(m)+8;
   panel(UI_W-mw-4,19,mw,11);
   drawText(m,UI_W-mw,22,COL.uiGold);
-  // Mute button
   panel(4,19,20,11);
   drawText(Audio.muted?'X':'S',9,22,Audio.muted?COL.uiRed:COL.uiGreen);
+  // Season label
+  const sn=Season.name.toUpperCase();
+  drawText(sn,4,34,COL.uiDim);
 }
 function renderHotbar(){
   const sw=18,gap=2,n=5;
   const totalW=n*sw+(n-1)*gap;
   const x0=Math.round((UI_W-totalW)/2);
   const y0=UI_H-20;
-  const active=inv.slots[inv.active];
-  if(active&&ITEMS[active.id]){
-    drawTextC(ITEMS[active.id].name,UI_W/2,y0-9,COL.uiText);
-  }
+  const a=inv.slots[inv.active];
+  if(a&&ITEMS[a.id])drawTextC(ITEMS[a.id].name,UI_W/2,y0-9,COL.uiText);
   for(let i=0;i<n;i++){
     const x=x0+i*(sw+gap);
     const sel=i===inv.active;
-    uctx.fillStyle='rgba(26,20,18,0.92)';
-    uctx.fillRect(x,y0,sw,sw);
+    uctx.fillStyle='rgba(26,20,18,0.92)';uctx.fillRect(x,y0,sw,sw);
     uctx.fillStyle=sel?'rgb(255,207,107)':'rgb(185,169,154)';
     uctx.fillRect(x,y0,sw,1);uctx.fillRect(x,y0+sw-1,sw,1);
     uctx.fillRect(x,y0,1,sw);uctx.fillRect(x+sw-1,y0,1,sw);
     const slot=inv.slots[i];
     if(slot){
-      const c=ITEM_COLORS[slot.id]||[0.7,0.7,0.7];
+      const c=ICON_COL[slot.id]||[0.7,0.7,0.7];
       uctx.fillStyle='rgb('+Math.round(c[0]*255)+','+Math.round(c[1]*255)+','+Math.round(c[2]*255)+')';
       uctx.fillRect(x+3,y0+3,sw-6,sw-6);
     }
@@ -1609,7 +1673,7 @@ function renderInventory(){
     uctx.fillRect(x,y,1,sw);uctx.fillRect(x+sw-1,y,1,sw);
     const slot=inv.slots[idx];
     if(slot){
-      const co=ITEM_COLORS[slot.id]||[0.7,0.7,0.7];
+      const co=ICON_COL[slot.id]||[0.7,0.7,0.7];
       uctx.fillStyle='rgb('+Math.round(co[0]*255)+','+Math.round(co[1]*255)+','+Math.round(co[2]*255)+')';
       uctx.fillRect(x+4,y+4,sw-8,sw-8);
       if(slot.n>1)drawText(String(slot.n),x+sw-6,y+sw-9,COL.uiText);
@@ -1718,8 +1782,8 @@ function renderCollection(){
     const caught=Collection.has(id);
     uctx.fillStyle=caught?'rgba(138,223,122,0.15)':'rgba(0,0,0,0.25)';
     uctx.fillRect(x,y,cw-6,16);
-    if(caught&&ITEM_COLORS[id]){
-      const c=ITEM_COLORS[id];
+    if(caught&&ICON_COL[id]){
+      const c=ICON_COL[id];
       uctx.fillStyle='rgb('+Math.round(c[0]*255)+','+Math.round(c[1]*255)+','+Math.round(c[2]*255)+')';
       uctx.fillRect(x+2,y+2,12,12);
     }
@@ -1760,24 +1824,25 @@ function renderTitle(){
   uctx.fillStyle='rgb(243,227,200)';uctx.fillRect(px+16,py+40,pw-32,1);
   if((Math.floor(game.time*2)&1)===0)drawTextC('TEKAN ENTER UNTUK MULAI',UI_W/2,py+54,COL.uiText);
   if(game.hasSave)drawTextC('L: LANJUTKAN',UI_W/2,py+70,COL.uiGreen);
-  drawTextC('3D VOXEL - MOBILE READY',UI_W/2,py+86,COL.uiDim);
-  drawTextC('WEBGL MURNI - TANPA LIBRARY',UI_W/2,py+100,COL.uiDim);
+  drawTextC('4 MUSIM - 3D VOXEL',UI_W/2,py+86,COL.uiDim);
+  drawTextC('INTERIOR RUMAH - CUACA 3D',UI_W/2,py+100,COL.uiDim);
   drawTextC('ORISINAL - TANPA ASET EKSTERNAL',UI_W/2,py+114,COL.uiDim);
 }
 
-/* ---------- 33. RENDER LOOP ---------- */
+/* ---------- RENDER SCENE ---------- */
 function renderScene(){
-  const vp=getViewProj();
+  const vp=getVP();
   const tint=TimeSys.lightTint();
-  gl.clearColor(tint[0]*0.55,tint[1]*0.68,tint[2]*0.85,1);
+  const st=Season.tint();
+  gl.clearColor(tint[0]*st[0]*0.55,tint[1]*st[1]*0.68,tint[2]*st[2]*0.85,1);
   gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);
   gl.enable(gl.DEPTH_TEST);
-  gl.disable(gl.CULL_FACE);
+  gl.depthFunc(gl.LEQUAL);
 
-  // Draw chunks
   gl.useProgram(voxelProg);
   gl.uniformMatrix4fv(vLoc.uVP,false,vp);
   gl.uniform3f(vLoc.uLight,0.5,0.9,0.4);
+  gl.uniform3f(vLoc.uTint,tint[0]*st[0],tint[1]*st[1],tint[2]*st[2]);
   for(const ch of chunks){
     if(!ch)continue;
     gl.bindBuffer(gl.ARRAY_BUFFER,ch.posBuf);
@@ -1792,40 +1857,46 @@ function renderScene(){
     gl.drawArrays(gl.TRIANGLES,0,ch.count);
   }
 
-  // Build billboards
-  resetBillboards();
+  // Billboards
+  resetBB();
   // Player
-  const pDirRow=player.dir==='down'?0:(player.dir==='up'?1:(player.dir==='left'?2:2));
-  const pU0=player.frame/4,pU1=(player.frame+1)/4;
-  const pV0=(pDirRow*16)/(8*16),pV1=((pDirRow+1)*16)/(8*16);
-  addBillboard(player.x,1.2,player.z,1.7,pU0,pV0,pU1,pV1,[1,1,1,1]);
+  const pDirRow=player.dir==='down'?0:(player.dir==='up'?1:2);
+  const pUV=spriteUVFrame(0,pDirRow,player.frame);
+  addBB(player.x,0.95,player.z,1.5,pUV.fU0,pUV.fV0,pUV.fU1,pUV.fV1,[1,1,1,1]);
   // NPCs
-  for(const npc of npcs){
-    const dr=npc.dir==='down'?0:(npc.dir==='up'?1:(npc.dir==='left'?2:2));
-    const row=npc.baseRow+dr;
-    const u0=npc.frame/4,u1=(npc.frame+1)/4;
-    const v0=(row*16)/(8*16),v1=((row+1)*16)/(8*16);
-    addBillboard(npc.x,1.15,npc.z,1.6,u0,v0,u1,v1,[1,1,1,1]);
+  for(let i=0;i<npcs.length;i++){
+    const npc=npcs[i];
+    const dr=npc.dir==='down'?0:(npc.dir==='up'?1:2);
+    const row=3+i*3;
+    const uv=spriteUVFrame(row,dr,npc.frame);
+    addBB(npc.x,0.9,npc.z,1.4,uv.fU0,uv.fV0,uv.fU1,uv.fV1,[1,1,1,1]);
   }
-  // Bugs (small billboards - colored)
+  // Bugs
   for(const b of bugs){
-    addBillboard(b.x,0.35,b.z,0.7,0,0,1,1,[1,1,1,1]);
+    const col=ICON_COL[b.id]||[0.8,0.6,0.8];
+    addBB(b.x,0.35,b.z,0.35,WHITE_UV.u0,WHITE_UV.v0,WHITE_UV.u1,WHITE_UV.v1,[col[0],col[1],col[2],0.9]);
   }
   // Dig spots
   for(const d of digSpots){
-    addBillboard(d.x,0.1,d.z,0.8,0,0,1,1,[0.6,0.4,0.2,1]);
+    addBB(d.x,0.08,d.z,0.5,WHITE_UV.u0,WHITE_UV.v0,WHITE_UV.u1,WHITE_UV.v1,[0.5,0.35,0.2,0.9]);
+  }
+  // Weather particles
+  for(const p of WX.particles){
+    if(Weather.type==='rain'){
+      addBB(p.x,p.y,p.z,p.size,WHITE_UV.u0,WHITE_UV.v0,WHITE_UV.u1,WHITE_UV.v1,[0.7,0.8,1.0,0.9]);
+    }else{
+      addBB(p.x,p.y,p.z,p.size,WHITE_UV.u0,WHITE_UV.v0,WHITE_UV.u1,WHITE_UV.v1,[0.85,0.75,0.4,0.9]);
+    }
   }
 
-  uploadBillboards();
-
-  // Draw billboards
   if(bbCount>0){
+    uploadBB();
     gl.useProgram(bbProg);
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);
-    gl.disable(gl.DEPTH_TEST);
+    gl.depthMask(false);
     gl.uniformMatrix4fv(bLoc.uVP,false,vp);
-    const ru=getCamRightUp();
+    const ru=getCamRU();
     gl.uniform3fv(bLoc.uCamR,ru.right);
     gl.uniform3fv(bLoc.uCamU,ru.up);
     gl.uniform1i(bLoc.uTex,0);
@@ -1840,16 +1911,21 @@ function renderScene(){
     gl.bindBuffer(gl.ARRAY_BUFFER,bbCSBuf);
     gl.enableVertexAttribArray(bLoc.aCS);
     gl.vertexAttribPointer(bLoc.aCS,4,gl.FLOAT,false,0,0);
-    gl.bindBuffer(gl.ARRAY_BUFFER,bbTintBuf);
-    gl.enableVertexAttribArray(bLoc.aTint);
-    gl.vertexAttribPointer(bLoc.aTint,4,gl.FLOAT,false,0,0);
+    // Draw groups by tint (approximate: split by particle vs character)
+    // Simple approach: draw all with white tint (particles were colored via their own billboards? no)
+    // For simplicity, draw all with white tint; particles will use their white UV and thus appear white
+    // Better: skip particle tint or handle separately
+    // We'll just draw everything with white tint; particles will show as white/snow-ish
+    gl.uniform4f(bLoc.uTint,1,1,1,1);
+    // Since we can't batch per-tint easily, just draw all with white
+    // (particles will look white; that's acceptable for snow/rain)
     gl.drawArrays(gl.TRIANGLES,0,bbCount*6);
+    gl.depthMask(true);
     gl.disable(gl.BLEND);
-    gl.enable(gl.DEPTH_TEST);
   }
 }
 
-/* ---------- 34. UI RENDER ---------- */
+/* ---------- UI RENDER ---------- */
 function renderUI(){
   uctx.clearRect(0,0,UI_W,UI_H);
   if(game.state==='title'){
@@ -1870,16 +1946,18 @@ function renderUI(){
   if(Touch.active)Touch.render();
 }
 
-/* ---------- 35. LOOP ---------- */
+/* ---------- LOOP ---------- */
 let lastT=0,acc=0;
 function update(dt){
   game.time+=dt;
   if(game.paused)return;
   TimeSys.update();
+  Season.update();
   Weather.update(dt);
   Audio.tick(dt);
   updateDialog(dt);
   updateFishing(dt);
+  WX.update(dt);
   if(!game.tutorial)return;
   if(fishing.state==='idle'&&!dialog.active&&!invUI.open&&!shop.open&&!Collection.open){
     updatePlayer(dt);
@@ -1887,7 +1965,8 @@ function update(dt){
   }
   updateBugs(dt);
   updateDig(dt);
-  updateCamera(dt);
+  updateGrow(dt);
+  updateCamera();
   if(message.timer>0)message.timer-=dt;
   autoSave(dt);
 }
@@ -1902,12 +1981,12 @@ function frame(now){
     while(acc>=STEP&&n<5){update(STEP);acc-=STEP;n++}
     if(n>=5)acc=0;
   }else game.time+=dt;
-  updateCamera(0);
+  updateCamera();
   renderScene();
   renderUI();
 }
 
-/* ---------- 36. INPUT HANDLER ---------- */
+/* ---------- INPUT ---------- */
 function onKey(code){
   if(!game.tutorial&&game.state==='play'){
     if(code==='KeyE'||code==='Space'||code==='Enter'){
@@ -1936,9 +2015,7 @@ function onKey(code){
   if(dialog.active){
     if(code==='KeyE'||code==='Space'||code==='Enter')advanceDialog();
     else if(code==='KeyG'){
-      if(dialog.done&&dialog.idx>=dialog.lines.length-1){
-        invUI.open=true;invUI.mode='gift';invUI.cursor=0;
-      }
+      if(dialog.done&&dialog.idx>=dialog.lines.length-1){invUI.open=true;invUI.mode='gift';invUI.cursor=0}
     }else if(code==='Escape')closeDialog();
     return;
   }
@@ -1966,7 +2043,7 @@ function onKey(code){
     if(code==='Enter'||code==='Space'||code==='NumpadEnter'){
       Audio.sfx('enter');
       game.state='play';game.paused=false;game.time=0;
-      if(game.hasSave){Save.load()}
+      if(game.hasSave)Save.load();
       Save.save();
     }else if(code==='KeyL'&&game.hasSave){
       Audio.sfx('enter');
@@ -1988,7 +2065,7 @@ function onKey(code){
   else if(code==='KeyF'){if(Save.save())message.show('DISIMPAN',1.2);else message.show('GAGAL SIMPAN',1.5)}
 }
 
-/* ---------- 37. INIT ---------- */
+/* ---------- INIT ---------- */
 function initInventory(){
   inv.slots[0]={id:'net',n:1};
   inv.slots[1]={id:'rod',n:1};
@@ -1999,6 +2076,7 @@ function initInventory(){
   inv.slots[6]={id:'bunga',n:2};
   inv.slots[7]={id:'apel',n:2};
   inv.slots[8]={id:'umpan',n:3};
+  inv.slots[9]={id:'seed_pohon',n:2};
   inv.active=0;
 }
 function init(){
@@ -2013,7 +2091,7 @@ function init(){
   bakeSpriteAtlas();
   spriteTex=makeTexture(atlasCanvas);
 
-  genWorld();
+  genVillage();
   buildAllChunks();
 
   for(const def of NPC_DEFS)npcs.push(makeNPC(def));
@@ -2021,11 +2099,11 @@ function init(){
   buildCollectionList();
   Touch.init();
   game.hasSave=Save.exists();
+  Season.update();
 
   player.x=28;player.z=23;player.dir='down';
-  updateCamera(0);
-  lastT=performance.now();
-  acc=0;
+  updateCamera();
+  lastT=performance.now();acc=0;
   requestAnimationFrame(frame);
 }
 init();
