@@ -1577,4 +1577,547 @@ function interact() {
   if (toolId === 'net') { tryCatchBug(); return; }
   if (toolId === 'shovel') { tryDig(); return; }
   if (toolId === 'axe') { tryChop(); return; }
-  if (toolId === '
+  if (toolId === 'water') { message.show('PENYIRAM DIPAKAI', 1.0); return; }
+  if (toolId === 'seed_bunga') { tryPlant(); return; }
+  message.show(ITEMS[toolId].name.toUpperCase() + ' DIPAKAI', 1.0);
+}
+function enterHouse() {
+  player.scene = 'interior';
+  player.x = interior.entryTX * TILE + 8;
+  player.y = interior.entryTY * TILE + TILE - 2;
+  player.dir = 'up';
+  AudioSys.playSfx('enter');
+  SaveSys.save();
+}
+function exitHouse() {
+  player.scene = 'world';
+  const house = objects.find(o => o.type === 'house');
+  if (house) { player.x = house.doorX; player.y = house.doorY + 12; }
+  player.dir = 'down';
+  AudioSys.playSfx('enter');
+}
+
+/* ---------- 30. KAMERA ---------- */
+const camera = { x: 0, y: 0 };
+function clampCamX(v) { return Math.max(0, Math.min(WORLD_W - W, v)); }
+function clampCamY(v) { return Math.max(0, Math.min(WORLD_H - H, v)); }
+function snapCamera() {
+  if (player.scene === 'interior') { camera.x = (IN_W * TILE - W) / 2; camera.y = (IN_H * TILE - H) / 2; }
+  else { camera.x = clampCamX(player.x - W / 2); camera.y = clampCamY(player.y - H / 2); }
+}
+function updateCamera(dt) {
+  if (player.scene === 'interior') { camera.x = (IN_W * TILE - W) / 2; camera.y = (IN_H * TILE - H) / 2; return; }
+  const tx = clampCamX(player.x - W / 2), ty = clampCamY(player.y - H / 2);
+  camera.x += (tx - camera.x) * 0.14;
+  camera.y += (ty - camera.y) * 0.14;
+  camera.x = clampCamX(camera.x); camera.y = clampCamY(camera.y);
+}
+
+/* ---------- 31. RENDER DUNIA ---------- */
+const renderList = [];
+const playerRender = { x: 0, y: 0, img: null, sortY: 0, isPlayer: true };
+let waterFrame = 0;
+function renderWorld() {
+  const camX = Math.round(camera.x), camY = Math.round(camera.y);
+  ctx.drawImage(worldGround, camX, camY, W, H, 0, 0, W, H);
+  const tx0 = Math.max(0, Math.floor(camX / TILE)), ty0 = Math.max(0, Math.floor(camY / TILE));
+  const tx1 = Math.min(MAP_W - 1, Math.floor((camX + W) / TILE)), ty1 = Math.min(MAP_H - 1, Math.floor((camY + H) / TILE));
+  for (let ty = ty0; ty <= ty1; ty++) for (let tx = tx0; tx <= tx1; tx++) {
+    const i = ty * MAP_W + tx;
+    if (ground[i] === T.WATER) { const img = assets.water[waterVariant[i]][waterFrame]; ctx.drawImage(img, tx * TILE - camX, ty * TILE - camY); }
+  }
+  for (let i = 0; i < flowers.length; i++) {
+    const f = flowers[i];
+    if (f.x + 16 < camX || f.x > camX + W || f.y + 16 < camY || f.y > camY + H) continue;
+    const fr = (Math.floor(game.time * 1.6 + f.phase) & 1);
+    ctx.drawImage(f.img[fr], f.x - camX, f.y - camY);
+  }
+  // foot particles
+  for (let i = 0; i < footParticles.length; i++) {
+    const p = footParticles[i];
+    const alpha = Math.max(0, p.life / 0.4) * 0.5;
+    ctx.fillStyle = 'rgba(120,90,70,' + alpha + ')';
+    ctx.fillRect(Math.round(p.x - camX), Math.round(p.y - camY + 14), 2, 1);
+  }
+  for (let i = 0; i < digSpots.length; i++) {
+    const d = digSpots[i];
+    const dx = d.x - 4 - camX, dy = d.y - 2 - camY;
+    if (dx < -16 || dx > W || dy < -16 || dy > H) continue;
+    ctx.fillStyle = '#7d5738'; ctx.fillRect(dx + 1, dy + 2, 6, 2);
+    ctx.fillStyle = '#5a3a20'; ctx.fillRect(dx + 1, dy + 4, 6, 1);
+    ctx.fillStyle = '#a3764f'; ctx.fillRect(dx + 2, dy + 3, 4, 1);
+  }
+  renderList.length = 0;
+  for (let i = 0; i < objects.length; i++) {
+    const o = objects[i];
+    if (o.x + o.img.width < camX || o.x > camX + W) continue;
+    if (o.y + o.img.height < camY || o.y > camY + H) continue;
+    renderList.push(o);
+  }
+  for (let i = 0; i < bugs.length; i++) {
+    const b = bugs[i];
+    if (b.x < camX - 16 || b.x > camX + W + 16 || b.y < camY - 16 || b.y > camY + H + 16) continue;
+    const bf = Math.floor(b.phase) & 1;
+    const sp = bugSprites[b.id + '_' + bf];
+    if (sp) { ctx.drawImage(sp, Math.round(b.x - 6 - camX), Math.round(b.y - 6 - camY)); }
+  }
+  for (let i = 0; i < npcs.length; i++) {
+    const npc = npcs[i];
+    if (npc.x - 8 + 16 < camX || npc.x - 8 > camX + W) continue;
+    if (npc.y - 16 + 16 < camY || npc.y - 16 > camY + H) continue;
+    const ro = npc.renderObj;
+    ro.x = Math.round(npc.x - 8); ro.y = Math.round(npc.y - 16);
+    ro.img = npc.sprites[npc.dir][npc.frame]; ro.sortY = Math.round(npc.y);
+    renderList.push(ro);
+  }
+  playerRender.x = Math.round(player.x - 8); playerRender.y = Math.round(player.y - 16);
+  playerRender.img = assets.player[player.dir][player.frame]; playerRender.sortY = Math.round(player.y);
+  renderList.push(playerRender);
+  renderList.sort((a, b) => a.sortY - b.sortY);
+  for (let i = 0; i < renderList.length; i++) {
+    const o = renderList[i];
+    const dx = Math.round(o.x - camX), dy = Math.round(o.y - camY);
+    if (o.isPlayer || o.isNPC) ctx.drawImage(playerShadow, dx, dy + 12);
+    ctx.drawImage(o.img, dx, dy);
+  }
+  if (fishing.state === 'waiting' || fishing.state === 'bite' || fishing.state === 'casting') {
+    const sx = Math.round(player.x - camX), sy = Math.round(player.y - camY - 4);
+    const ex = Math.round(fishing.castX - camX), ey = Math.round(fishing.castY - camY);
+    ctx.fillStyle = 'rgba(255,255,255,0.7)';
+    const steps = Math.max(Math.abs(ex - sx), Math.abs(ey - sy));
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps;
+      ctx.fillRect(Math.round(sx + (ex - sx) * t), Math.round(sy + (ey - sy) * t), 1, 1);
+    }
+    if (fishing.state === 'bite') drawText('!', ex - 1, ey - 10, C.uiGold);
+  }
+}
+function renderInterior() {
+  const camX = Math.round(camera.x), camY = Math.round(camera.y);
+  ctx.fillStyle = '#1a1412'; ctx.fillRect(0, 0, W, H);
+  ctx.drawImage(interior.canvas, camX, camY);
+  const px = Math.round(player.x - 8 - camX), py = Math.round(player.y - 16 - camY);
+  ctx.drawImage(playerShadow, px, py + 12);
+  ctx.drawImage(assets.player[player.dir][player.frame], px, py);
+}
+function applyTint() {
+  const t1 = TimeSys.getTint(), t2 = Weather.getTint();
+  if (t1 && t1.a > 0) { ctx.fillStyle = 'rgba(' + t1.r + ',' + t1.g + ',' + t1.b + ',' + t1.a + ')'; ctx.fillRect(0, 0, W, H); }
+  if (t2 && t2.a > 0) { ctx.fillStyle = 'rgba(' + t2.r + ',' + t2.g + ',' + t2.b + ',' + t2.a + ')'; ctx.fillRect(0, 0, W, H); }
+  Weather.render();
+}
+
+/* ---------- 32. RENDER UI ---------- */
+function renderHUD() {
+  drawPanel(4, 4, 68, 15);
+  drawText(player.scene === 'interior' ? 'RUMAH' : 'DESA', 9, 8, C.uiGold);
+  const wIcon = Weather.type === 'sunny' ? 'CERAH' : (Weather.type === 'rain' ? 'HUJAN' : 'ANGIN');
+  const topStr = TimeSys.format() + ' ' + wIcon;
+  const tw = textWidth(topStr) + 10;
+  drawPanel(W - tw - 4, 4, tw, 15);
+  drawText(topStr, W - tw + 1, 8, C.uiText);
+  const mStr = money.amount + 'K';
+  const mw = textWidth(mStr) + 10;
+  drawPanel(W - mw - 4, 21, mw, 13);
+  drawText(mStr, W - mw + 1, 24, C.uiGold);
+  // Mute button
+  const muteX = 4, muteY = 21;
+  drawPanel(muteX, muteY, 20, 13);
+  drawText(AudioSys.muted ? 'X' : 'S', muteX + 8, muteY + 3, AudioSys.muted ? C.uiRed : C.uiGreen);
+  if (Touch.active) {
+    // smaller HUD, but panel top right + bottom hotbar still okay
+  }
+}
+function renderHotbar() {
+  const slots = 5, sw = 20, gap = 2;
+  const totalW = slots * sw + (slots - 1) * gap;
+  const x0 = Math.round((W - totalW) / 2), y0 = H - 22;
+  const active = inventory.slots[inventory.activeTool];
+  if (active && ITEMS[active.id]) drawTextCentered(ITEMS[active.id].name.toUpperCase(), W / 2, y0 - 9, C.uiText);
+  for (let i = 0; i < slots; i++) {
+    const sx = x0 + i * (sw + gap);
+    const isSel = i === inventory.activeTool;
+    ctx.fillStyle = 'rgba(26,20,18,0.92)';
+    ctx.fillRect(sx, y0, sw, sw);
+    ctx.fillStyle = isSel ? C.uiGold : C.uiDim;
+    ctx.fillRect(sx, y0, sw, 1); ctx.fillRect(sx, y0 + sw - 1, sw, 1);
+    ctx.fillRect(sx, y0, 1, sw); ctx.fillRect(sx + sw - 1, y0, 1, sw);
+    const slot = inventory.slots[i];
+    if (slot && itemIcons[slot.id]) ctx.drawImage(itemIcons[slot.id], sx + 2, y0 + 2);
+    drawText(String(i + 1), sx + 1, y0 + 1, isSel ? C.uiGold : C.uiDim);
+  }
+}
+function renderInventory() {
+  ctx.fillStyle = 'rgba(16,12,10,0.60)'; ctx.fillRect(0, 0, W, H);
+  const pw = 180, ph = 128;
+  const px = Math.round((W - pw) / 2), py = Math.round((H - ph) / 2);
+  drawPanel(px, py, pw, ph);
+  drawTextCentered(invUI.mode === 'gift' ? 'PILIH HADIAH' : 'TAS', W / 2, py + 7, C.uiGold);
+  const cols = 5, rows = 4, sw = 22, gap = 2;
+  const gridW = cols * sw + (cols - 1) * gap;
+  const gx = Math.round(px + (pw - gridW) / 2), gy = py + 20;
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+    const idx = r * cols + c;
+    const sx = gx + c * (sw + gap), sy = gy + r * (sw + gap);
+    ctx.fillStyle = 'rgba(20,15,13,0.85)'; ctx.fillRect(sx, sy, sw, sw);
+    const isSel = idx === invUI.cursor;
+    ctx.fillStyle = isSel ? C.uiGold : C.uiDim;
+    ctx.fillRect(sx, sy, sw, 1); ctx.fillRect(sx, sy + sw - 1, sw, 1);
+    ctx.fillRect(sx, sy, 1, sw); ctx.fillRect(sx + sw - 1, sy, 1, sw);
+    const slot = inventory.slots[idx];
+    if (slot && itemIcons[slot.id]) {
+      ctx.drawImage(itemIcons[slot.id], sx + 3, sy + 3);
+      if (slot.count > 1) drawText(String(slot.count), sx + sw - 6, sy + sw - 8, C.uiText);
+    }
+    if (idx < 5) drawText(String(idx + 1), sx + 1, sy + 1, C.uiDim);
+  }
+  const sel = inventory.slots[invUI.cursor];
+  let infoY = gy + rows * (sw + gap) + 4;
+  if (sel && ITEMS[sel.id]) { drawText(ITEMS[sel.id].name, gx, infoY, C.uiText); infoY += 9; drawText(ITEMS[sel.id].desc, gx, infoY, C.uiDim); }
+  else drawText('KOSONG', gx, infoY, C.uiDim);
+  const hint = invUI.mode === 'gift' ? 'ENTER: BERI   ESC: BATAL' : 'ENTER: PAKAI   I/ESC: TUTUP';
+  drawTextCentered(hint, W / 2, py + ph - 11, C.uiGold);
+}
+function renderDialog() {
+  if (!dialog.active || !dialog.npc) return;
+  const px = 6, py = H - 44, pw = W - 12, ph = 40;
+  drawPanel(px, py, pw, ph);
+  drawText(dialog.npc.name, px + 6, py + 5, C.uiGold);
+  drawText(dialog.text, px + 6, py + 16, C.uiText);
+  if (dialog.typewriterDone) {
+    drawText(isLastLine() ? 'E: TUTUP   G: HADIAH   ESC: KELUAR' : 'E: LANJUT', px + 6, py + 29, C.uiDim);
+  } else drawText('E: LEWATI', px + 6, py + 29, C.uiDim);
+}
+function renderMessage() {
+  if (message.timer <= 0) return;
+  const tw = textWidth(message.text) + 10;
+  const tx = Math.round((W - tw) / 2);
+  drawPanel(tx, 40, tw, 14);
+  drawTextCentered(message.text, W / 2, 44, C.uiText);
+}
+function renderFishingUI() {
+  if (fishing.state === 'idle') return;
+  if (fishing.state === 'casting') drawTextCentered('MELEMPAR KAIL...', W / 2, 70, C.uiText);
+  else if (fishing.state === 'waiting') drawTextCentered('MENUNGGU IKAN...', W / 2, 70, C.uiText);
+  else if (fishing.state === 'bite') {
+    drawTextCentered('! TARIK SEKARANG !', W / 2, 60, C.uiGold);
+    if ((Math.floor(game.time * 8) & 1) === 0) drawTextCentered('TEKAN E', W / 2, 72, C.uiText);
+  } else if (fishing.state === 'minigame') {
+    const bw = 160, bh = 8;
+    const bx = Math.round((W - bw) / 2), by = 86;
+    ctx.fillStyle = 'rgba(26,20,18,0.92)'; ctx.fillRect(bx - 2, by - 10, bw + 4, bh + 24);
+    ctx.fillStyle = '#2a1e16'; ctx.fillRect(bx, by, bw, bh);
+    ctx.fillStyle = C.uiGreen; ctx.fillRect(bx + Math.round(bw * 0.35), by, Math.round(bw * 0.30), bh);
+    const cx = bx + Math.round((fishing.cursor / 100) * bw);
+    ctx.fillStyle = C.uiGold; ctx.fillRect(cx - 1, by - 2, 3, bh + 4);
+    drawTextCentered('TEKAN E DI ZONA HIJAU', W / 2, by + bh + 4, C.uiText);
+  } else if (fishing.state === 'result') drawTextCentered(fishing.result, W / 2, 70, C.uiGold);
+}
+function renderShop() {
+  if (!shop.open) return;
+  ctx.fillStyle = 'rgba(16,12,10,0.65)'; ctx.fillRect(0, 0, W, H);
+  const pw = 200, ph = 140;
+  const px = Math.round((W - pw) / 2), py = Math.round((H - ph) / 2);
+  drawPanel(px, py, pw, ph);
+  drawTextCentered('TOKO EMBUN', W / 2, py + 6, C.uiGold);
+  const tabY = py + 18, tabW = 60;
+  for (let t = 0; t < 2; t++) {
+    const tx = px + 10 + t * (tabW + 4);
+    const isSel = shop.tab === t;
+    ctx.fillStyle = isSel ? 'rgba(255,207,107,0.20)' : 'rgba(20,15,13,0.7)';
+    ctx.fillRect(tx, tabY, tabW, 12);
+    ctx.fillStyle = isSel ? C.uiGold : C.uiDim;
+    ctx.fillRect(tx, tabY, tabW, 1); ctx.fillRect(tx, tabY + 11, tabW, 1);
+    ctx.fillRect(tx, tabY, 1, 12); ctx.fillRect(tx + tabW - 1, tabY, 1, 12);
+    drawText(t === 0 ? 'BELI' : 'JUAL', tx + (tabW >> 1) - 12, tabY + 3, isSel ? C.uiGold : C.uiDim);
+  }
+  const lx = px + 10; let ly = tabY + 18;
+  if (shop.tab === 0) {
+    for (let i = 0; i < shop.buyList.length; i++) {
+      const it = shop.buyList[i], isSel = i === shop.cursor;
+      ctx.fillStyle = isSel ? 'rgba(255,207,107,0.18)' : 'rgba(0,0,0,0.25)';
+      ctx.fillRect(lx, ly, pw - 20, 14);
+      if (itemIcons[it.id]) ctx.drawImage(itemIcons[it.id], lx + 2, ly - 1);
+      drawText(ITEMS[it.id].name, lx + 20, ly + 4, isSel ? C.uiGold : C.uiText);
+      drawText(String(it.price) + 'K', px + pw - 24, ly + 4, C.uiGold);
+      ly += 16;
+    }
+  } else {
+    for (let i = 0; i < 8; i++) {
+      const slot = inventory.slots[i], isSel = i === shop.cursor;
+      ctx.fillStyle = isSel ? 'rgba(255,207,107,0.18)' : 'rgba(0,0,0,0.25)';
+      ctx.fillRect(lx, ly, pw - 20, 12);
+      if (slot && itemIcons[slot.id]) {
+        ctx.drawImage(itemIcons[slot.id], lx + 2, ly - 1);
+        drawText(ITEMS[slot.id].name, lx + 20, ly + 3, isSel ? C.uiGold : C.uiText);
+        drawText('+' + getSellPrice(slot.id) + 'K', px + pw - 24, ly + 3, C.uiGold);
+      } else drawText('-KOSONG-', lx + 20, ly + 3, C.uiDim);
+      ly += 13;
+    }
+  }
+  drawText('KEPING: ' + money.amount, lx, py + ph - 22, C.uiGold);
+  drawTextCentered(shop.tab === 0 ? 'ENTER: BELI   TAB: JUAL   ESC: TUTUP' : 'ENTER: JUAL   TAB: BELI   ESC: TUTUP', W / 2, py + ph - 11, C.uiDim);
+}
+function renderCollection() {
+  if (!CollectionSys.open) return;
+  ctx.fillStyle = 'rgba(16,12,10,0.72)'; ctx.fillRect(0, 0, W, H);
+  const pw = 220, ph = 140;
+  const px = Math.round((W - pw) / 2), py = Math.round((H - ph) / 2);
+  drawPanel(px, py, pw, ph);
+  drawTextCentered('ENSIKLOPEDIA', W / 2, py + 6, C.uiGold);
+  drawTextCentered('IKAN & SERANGGA', W / 2, py + 16, C.uiDim);
+  const list = CollectionSys.list;
+  const colW = (pw - 16) / 2;
+  let y0 = py + 30;
+  for (let i = 0; i < list.length; i++) {
+    const id = list[i], col = i < 5 ? 0 : 1, row = i % 5;
+    const lx = px + 8 + col * colW, ly = y0 + row * 18;
+    const caught = CollectionSys.has(id);
+    ctx.fillStyle = caught ? 'rgba(138,223,122,0.15)' : 'rgba(0,0,0,0.25)';
+    ctx.fillRect(lx, ly, colW - 6, 16);
+    if (itemIcons[id]) {
+      ctx.globalAlpha = caught ? 1 : 0.30;
+      ctx.drawImage(itemIcons[id], lx + 2, ly);
+      ctx.globalAlpha = 1;
+    }
+    drawText(caught ? ITEMS[id].name : '???', lx + 20, ly + 5, caught ? C.uiText : C.uiDim);
+  }
+  drawTextCentered('ESC: TUTUP', W / 2, py + ph - 11, C.uiGold);
+}
+function renderPause() {
+  ctx.fillStyle = 'rgba(16,12,10,0.60)'; ctx.fillRect(0, 0, W, H);
+  const pw = 200, ph = 130;
+  const px = (W - pw) >> 1, py = (H - ph) >> 1;
+  drawPanel(px, py, pw, ph);
+  drawTextCentered('JEDA', W / 2, py + 8, C.uiGold);
+  const lines = ['WASD / PANAH : BERJALAN','E / SPASI    : INTERAKSI','Q / 1-5      : GANTI ALAT','I : TAS    C : ENSIKLOPEDIA','M : SUARA   F : SIMPAN'];
+  for (let i = 0; i < lines.length; i++) drawText(lines[i], px + 8, py + 22 + i * 9, C.uiText);
+  drawText('WAKTU: ' + TimeSys.format() + ' ' + TimeSys.getPhase(), px + 8, py + ph - 22, C.uiDim);
+  drawTextCentered('ESC UNTUK LANJUT', W / 2, py + ph - 11, C.uiGold);
+}
+function renderTutorial() {
+  if (game.tutorialShown) return;
+  ctx.fillStyle = 'rgba(16,12,10,0.72)'; ctx.fillRect(0, 0, W, H);
+  const pw = 240, ph = 110;
+  const px = (W - pw) >> 1, py = (H - ph) >> 1;
+  drawPanel(px, py, pw, ph);
+  drawTextCentered('SELAMAT DATANG DI', W / 2, py + 8, C.uiDim);
+  drawTextCentered('PONDOK EMBUN', W / 2, py + 18, C.uiGold);
+  const lines = [
+    'WASD / PANAH : BERJALAN',
+    'E / SPASI    : BICARA & PAKAI ALAT',
+    'Q / 1-5      : GANTI ALAT',
+    'I : TAS   C : ENSIKLOPEDIA',
+    'M : SUARA   ESC : JEDA',
+    'CARI PENDUDUK & BICARA!'
+  ];
+  for (let i = 0; i < lines.length; i++) drawTextCentered(lines[i], W / 2, py + 32 + i * 10, i === 5 ? C.uiGold : C.uiText);
+  if ((Math.floor(game.time * 2) & 1) === 0) drawTextCentered('TEKAN E UNTUK MULAI', W / 2, py + ph - 11, C.uiGold);
+}
+function renderTitle() {
+  // render world background for visual
+  if (worldGround) renderWorld();
+  else { ctx.fillStyle = C.grass1; ctx.fillRect(0, 0, W, H); }
+  applyTint();
+  ctx.fillStyle = 'rgba(20,15,13,0.66)'; ctx.fillRect(0, 0, W, H);
+  const pw = 232, ph = 130;
+  const px = (W - pw) >> 1, py = (H - ph) >> 1;
+  drawPanel(px, py, pw, ph);
+  drawTextCentered('PONDOK EMBUN', W / 2, py + 12, C.uiGold);
+  drawTextCentered('DESA KECIL YANG HANGAT', W / 2, py + 26, C.uiDim);
+  ctx.fillStyle = C.uiBorder; ctx.fillRect(px + 16, py + 40, pw - 32, 1);
+  if ((Math.floor(game.time * 2) & 1) === 0) drawTextCentered('TEKAN ENTER UNTUK MULAI', W / 2, py + 54, C.uiText);
+  if (game.hasSave) drawTextCentered('L: LANJUTKAN PERMAINAN', W / 2, py + 70, C.uiGreen);
+  drawTextCentered('VERSI LENGKAP - 4 TAHAP', W / 2, py + 86, C.uiDim);
+  drawTextCentered('AUDIO + SAVE + TOUCH', W / 2, py + 98, C.uiDim);
+  drawTextCentered('ORISINAL - TANPA ASET EKSTERNAL', W / 2, py + 112, C.uiDim);
+}
+
+/* ---------- 33. LOOP ---------- */
+let lastTime = 0, accumulator = 0, rafId = 0;
+function update(dt) {
+  game.time += dt;
+  if (game.paused) return;
+  TimeSys.update();
+  Weather.update(dt);
+  AudioSys.tickAmbient(dt);
+  updateDialog(dt);
+  updateFishing(dt);
+  if (!game.tutorialShown) return; // pause semua saat tutorial
+  if (fishing.state === 'idle' && !dialog.active && !invUI.open && !shop.open && !CollectionSys.open) {
+    updatePlayer(dt);
+    updateNPCs(dt);
+  }
+  updateBugs(dt);
+  updateDigSpots(dt);
+  updateFootParticles(dt);
+  updateCamera(dt);
+  waterFrame = Math.floor(game.time * 4) % 3;
+  if (message.timer > 0) message.timer -= dt;
+  autoSaveTick(dt);
+}
+function render() {
+  ctx.clearRect(0, 0, W, H);
+  if (game.state === 'title') { renderTitle(); if (Touch.active) Touch.render(); present(); return; }
+  if (player.scene === 'interior') renderInterior();
+  else renderWorld();
+  applyTint();
+  renderHUD();
+  renderHotbar();
+  renderMessage();
+  renderFishingUI();
+  if (invUI.open) renderInventory();
+  else if (dialog.active) renderDialog();
+  if (shop.open) renderShop();
+  if (CollectionSys.open) renderCollection();
+  if (game.paused) renderPause();
+  if (!game.tutorialShown) renderTutorial();
+  if (Touch.active) Touch.render();
+  present();
+}
+function frame(now) {
+  rafId = requestAnimationFrame(frame);
+  let dt = (now - lastTime) / 1000;
+  lastTime = now;
+  if (!isFinite(dt) || dt < 0) dt = 0;
+  if (dt > 0.25) dt = 0.25;
+  if (!game.paused) {
+    accumulator += dt;
+    let steps = 0;
+    while (accumulator >= STEP && steps < 5) { update(STEP); accumulator -= STEP; steps++; }
+    if (steps >= 5) accumulator = 0;
+  } else game.time += dt;
+  render();
+}
+
+/* ---------- 34. INPUT HANDLER ---------- */
+function onKeyPressed(code) {
+  // Tutorial dismiss
+  if (!game.tutorialShown && game.state === 'play') {
+    if (code === 'KeyE' || code === 'Space' || code === 'Enter') {
+      game.tutorialShown = true;
+      AudioSys.playSfx('menu');
+      SaveSys.save();
+    }
+    return;
+  }
+  if (fishing.state === 'bite' || fishing.state === 'minigame') {
+    if (code === 'KeyE' || code === 'Space') { fishingPress(); return; }
+  }
+  if (fishing.state !== 'idle') { if (code === 'Escape') fishing.state = 'idle'; return; }
+  if (shop.open) {
+    if (code === 'Escape') { shop.open = false; AudioSys.playSfx('menu'); return; }
+    if (code === 'Tab') { shop.tab = (shop.tab + 1) % 2; shop.cursor = 0; AudioSys.playSfx('menu'); return; }
+    if (code === 'ArrowUp' || code === 'KeyW') shop.cursor = Math.max(0, shop.cursor - 1);
+    else if (code === 'ArrowDown' || code === 'KeyS') {
+      const max = shop.tab === 0 ? shop.buyList.length - 1 : 7;
+      shop.cursor = Math.min(max, shop.cursor + 1);
+    }
+    else if (code === 'Enter' || code === 'Space' || code === 'KeyE') { if (shop.tab === 0) shopBuy(); else shopSell(); }
+    return;
+  }
+  if (CollectionSys.open) { if (code === 'Escape' || code === 'KeyC') CollectionSys.open = false; return; }
+  if (dialog.active) {
+    if (code === 'KeyE' || code === 'Space' || code === 'Enter') advanceDialog();
+    else if (code === 'KeyG') {
+      if (dialog.typewriterDone && isLastLine()) { invUI.open = true; invUI.mode = 'gift'; invUI.cursor = 0; }
+    } else if (code === 'Escape') closeDialog();
+    return;
+  }
+  if (invUI.open) {
+    if (code === 'Escape' || code === 'KeyI') { if (invUI.mode === 'gift') invUI.mode = 'normal'; invUI.open = false; return; }
+    if (code === 'ArrowLeft' || code === 'KeyA') invUI.cursor = Math.max(0, invUI.cursor - 1);
+    else if (code === 'ArrowRight' || code === 'KeyD') invUI.cursor = Math.min(19, invUI.cursor + 1);
+    else if (code === 'ArrowUp' || code === 'KeyW') invUI.cursor = Math.max(0, invUI.cursor - 5);
+    else if (code === 'ArrowDown' || code === 'KeyS') invUI.cursor = Math.min(19, invUI.cursor + 5);
+    else if (code === 'Enter' || code === 'Space' || code === 'KeyE') {
+      if (invUI.mode === 'gift') { if (inventory.slots[invUI.cursor]) giveGift(invUI.cursor); else message.show('SLOT KOSONG', 1.2); }
+      else { if (invUI.cursor < 5 && inventory.slots[invUI.cursor]) inventory.activeTool = invUI.cursor; }
+    }
+    return;
+  }
+  if (game.paused) {
+    if (code === 'Escape') { game.paused = false; lastTime = performance.now(); accumulator = 0; }
+    return;
+  }
+  if (game.state === 'title') {
+    if (code === 'Enter' || code === 'Space' || code === 'NumpadEnter') {
+      AudioSys.playSfx('enter');
+      game.state = 'play';
+      game.paused = false;
+      game.time = 0;
+      if (game.hasSave) {
+        const ok = SaveSys.load();
+        if (ok) message.show('PERMAINAN DIMUAT', 2);
+        else message.show('SIMPANAN RUSAK, MULAI BARU', 2);
+      }
+      snapCamera();
+      SaveSys.save();
+    } else if (code === 'KeyL' && game.hasSave) {
+      AudioSys.playSfx('enter');
+      game.state = 'play';
+      game.paused = false;
+      game.time = 0;
+      SaveSys.load();
+      snapCamera();
+      message.show('PERMAINAN DIMUAT', 2);
+    }
+    return;
+  }
+  if (code === 'Escape') { game.paused = true; accumulator = 0; AudioSys.playSfx('menu'); }
+  else if (code === 'KeyE' || code === 'Space') interact();
+  else if (code === 'KeyQ') inventory.cycleTool();
+  else if (code === 'Digit1' || code === 'Digit2' || code === 'Digit3' || code === 'Digit4' || code === 'Digit5') {
+    const idx = parseInt(code.charAt(5), 10) - 1;
+    if (inventory.slots[idx]) inventory.activeTool = idx;
+  }
+  else if (code === 'KeyI') { invUI.open = true; invUI.mode = 'normal'; invUI.cursor = 0; AudioSys.playSfx('menu'); }
+  else if (code === 'KeyC') { CollectionSys.open = true; AudioSys.playSfx('menu'); }
+  else if (code === 'KeyM') AudioSys.toggleMute();
+  else if (code === 'KeyF') { if (SaveSys.save()) message.show('DIMUAT', 1.2); else message.show('GAGAL SIMPAN', 1.5); }
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) SaveSys.save();
+  lastTime = performance.now(); accumulator = 0;
+});
+window.addEventListener('resize', () => resize());
+window.addEventListener('beforeunload', () => SaveSys.save());
+
+/* ---------- 35. INIT ---------- */
+function initInventory() {
+  inventory.slots[0] = { id: 'net',    count: 1 };
+  inventory.slots[1] = { id: 'rod',    count: 1 };
+  inventory.slots[2] = { id: 'shovel', count: 1 };
+  inventory.slots[3] = { id: 'axe',    count: 1 };
+  inventory.slots[4] = { id: 'water',  count: 1 };
+  inventory.slots[5] = { id: 'daun',   count: 3 };
+  inventory.slots[6] = { id: 'bunga',  count: 2 };
+  inventory.slots[7] = { id: 'apel',   count: 2 };
+  inventory.slots[8] = { id: 'umpan',  count: 3 };
+  inventory.activeTool = 0;
+}
+function init() {
+  resize();
+  Input.init();
+  AudioSys.init();
+  bakeAllAssets();
+  generateWorld();
+  worldGround = bakeWorldCanvas();
+  generateInterior();
+  for (let i = 0; i < NPC_DEFS.length; i++) npcs.push(createNPC(NPC_DEFS[i]));
+  initInventory();
+  buildCollectionList();
+  Touch.init();
+  player.x = 440; player.y = 372; player.dir = 'down';
+  snapCamera();
+  game.time = 0;
+  game.hasSave = SaveSys.exists();
+  lastTime = performance.now();
+  accumulator = 0;
+  rafId = requestAnimationFrame(frame);
+}
+init();
+</script>
+</body>
+</html>
