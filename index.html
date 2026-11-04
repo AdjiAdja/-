@@ -5,2184 +5,2028 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
-<meta name="theme-color" content="#100d0c">
-<title>Pondok Embun — Cozy Village Sim</title>
+<title>Pondok Embun 3D — Cozy Village Sim</title>
 <style>
   *{margin:0;padding:0;box-sizing:border-box}
-  html,body{width:100%;height:100%;overflow:hidden;background:#100d0c;display:flex;align-items:center;justify-content:center;touch-action:none;-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent;overscroll-behavior:none}
-  canvas{display:block;image-rendering:pixelated;image-rendering:crisp-edges;-ms-interpolation-mode:nearest-neighbor;background:#100d0c;box-shadow:0 0 20px rgba(0,0,0,0.8)}
+  html,body{width:100%;height:100%;overflow:hidden;background:#87b5d8;touch-action:none;-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent;overscroll-behavior:none}
+  #gl{display:block;position:fixed;top:0;left:0;width:100%;height:100%}
+  #ui{display:block;position:fixed;top:0;left:0;pointer-events:none;image-rendering:pixelated;image-rendering:crisp-edges}
 </style>
 </head>
 <body>
-<canvas id="game"></canvas>
+<canvas id="gl"></canvas>
+<canvas id="ui"></canvas>
 <script>
 "use strict";
 /* =========================================================================
-   PONDOK EMBUN — Enhanced Mobile Edition
+   PONDOK EMBUN 3D — Voxel Cozy Village Sim
+   WebGL murni, tanpa library. Mobile-first.
    ========================================================================= */
 
 /* ---------- 1. KONSTANTA ---------- */
-const W = 320, H = 180, TILE = 16;
-const MAP_W = 64, MAP_H = 48;
-const WORLD_W = MAP_W * TILE, WORLD_H = MAP_H * TILE;
-const STEP = 1 / 60;
-const SPEED = 74, NPC_SPEED = 28;
-const INTERACT_RADIUS = 22;
-const SAVE_KEY = 'pondok-embun-save-v1';
-const SAVE_VERSION = 1;
+const MAP_W=64,MAP_H=48;
+const TILE=1;
+const WORLD_W=MAP_W*TILE,WORLD_H=MAP_H*TILE;
+const STEP=1/60;
+const SPEED=3.5,NPC_SPEED=1.3;
+const INTERACT_R=1.8;
+const SAVE_KEY='pondok-embun-3d-v1',SAVE_VERSION=1;
 
-const C = {
-  grass1:'#8ecf6a', grass2:'#79bb58', grass3:'#a8dd85',
-  path1:'#d9b98a',  path2:'#c8a371',  path3:'#e6cda6',
-  sand1:'#f2e2b0',  sand2:'#e6d29a',
-  water1:'#5fbcd8', water2:'#7fd0e8', water3:'#a9e2f2', water4:'#3f9cbe',
-  trunk1:'#8a5c3c', trunk2:'#6b4429',
-  leaf1:'#5aa34a',  leaf2:'#71bd5c',  leaf3:'#8dd374',  leaf4:'#468a3a',
-  wood1:'#c49a6c',  wood2:'#a3764f',  wood3:'#7d5738',
-  roof1:'#d9705f',  roof2:'#b9534a',  roof3:'#e58775',
-  wall1:'#f3e3c8',  wall2:'#e0cba9',
-  stone1:'#c2c7cf', stone2:'#9aa1ab', stone3:'#e2e6ec',
-  glass:'#9fd4e0',  glass2:'#c8eaf2',
-  outline:'#2c1f19',
-  skin:'#f7c9a3', hair:'#6b4a2f', shirt:'#e07a5f', shirtS:'#c25b45',
-  pants:'#4a6fa5', shoe:'#4a3527',
-  uiBorder:'#f3e3c8', uiText:'#f7efdf', uiGold:'#ffcf6b', uiDim:'#b9a99a',
-  uiDark:'#1a1412', uiSelect:'#7ecfff', uiGreen:'#8adf7a', uiRed:'#e87070',
-  floor1:'#a0764f', floor2:'#8a6240', floorLine:'#6b4a32',
-  wallTop:'#5d3f2a', wallBot:'#7d5738'
+const COL={
+  grassA:[0.55,0.80,0.42],grassB:[0.47,0.72,0.35],grassC:[0.62,0.85,0.50],
+  pathA:[0.82,0.70,0.52],pathB:[0.72,0.60,0.42],
+  sandA:[0.94,0.87,0.68],sandB:[0.86,0.78,0.58],
+  waterA:[0.32,0.68,0.82],waterB:[0.42,0.78,0.92],
+  trunk:[0.52,0.35,0.22],trunkD:[0.38,0.25,0.15],
+  leafA:[0.30,0.62,0.28],leafB:[0.42,0.75,0.36],leafC:[0.52,0.82,0.42],
+  rock:[0.68,0.72,0.78],rockD:[0.45,0.50,0.55],
+  wood:[0.76,0.60,0.42],woodD:[0.52,0.36,0.22],
+  roof:[0.85,0.42,0.38],roofD:[0.68,0.30,0.28],
+  wall:[0.95,0.88,0.78],wallD:[0.82,0.72,0.60],
+  glass:[0.62,0.82,0.88],door:[0.55,0.35,0.20],
+  skin:[0.96,0.78,0.62],skinD:[0.85,0.65,0.50],
+  hair:[0.42,0.28,0.18],hairD:[0.30,0.20,0.12],
+  shirt:[0.88,0.48,0.35],pants:[0.28,0.42,0.62],shoe:[0.28,0.20,0.15],
+  uiBg:[0.10,0.08,0.07,0.94],uiBorder:[0.95,0.88,0.78],uiText:[0.97,0.94,0.88],
+  uiGold:[1.0,0.81,0.42],uiDim:[0.72,0.65,0.58],uiGreen:[0.54,0.87,0.48],
+  uiRed:[0.91,0.44,0.44],uiSel:[1.0,0.81,0.42],uiNight:[0.10,0.14,0.32]
 };
 
-const T = { GRASS:0, PATH:1, SAND:2, WATER:3, FLOOR:4, WALL:5, DOOR:6 };
+/* ---------- 2. MATH ---------- */
+const V3={
+  sub:(a,b)=>[a[0]-b[0],a[1]-b[1],a[2]-b[2]],
+  add:(a,b)=>[a[0]+b[0],a[1]+b[1],a[2]+b[2]],
+  scale:(a,s)=>[a[0]*s,a[1]*s,a[2]*s],
+  dot:(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2],
+  cross:(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]],
+  len:a=>Math.sqrt(a[0]*a[0]+a[1]*a[1]+a[2]*a[2]),
+  norm:a=>{const l=V3.len(a)||1;return[a[0]/l,a[1]/l,a[2]/l]}
+};
+const M4={
+  perspective:(fov,aspect,near,far)=>{
+    const f=1/Math.tan(fov/2),nf=1/(near-far);
+    return new Float32Array([f/aspect,0,0,0, 0,f,0,0, 0,0,(far+near)*nf,-1, 0,0,2*far*near*nf,0]);
+  },
+  lookAt:(eye,target,up)=>{
+    const z=V3.norm(V3.sub(eye,target));
+    const x=V3.norm(V3.cross(up,z));
+    const y=V3.cross(z,x);
+    return new Float32Array([
+      x[0],y[0],z[0],0, x[1],y[1],z[1],0, x[2],y[2],z[2],0,
+      -V3.dot(x,eye),-V3.dot(y,eye),-V3.dot(z,eye),1
+    ]);
+  }
+};
 
-/* ---------- 2. UTIL ---------- */
-function makeCanvas(w, h) {
-  const c = document.createElement('canvas');
-  c.width = w; c.height = h;
-  const x = c.getContext('2d');
-  x.imageSmoothingEnabled = false;
-  return c;
+/* ---------- 3. UTILITAS ---------- */
+function hash2(x,y,s){
+  let h=Math.imul(x|0,374761393)+Math.imul(y|0,668265263)+Math.imul(s|0,1442695041);
+  h=Math.imul(h^(h>>>13),1274126177); h=h^(h>>>16);
+  return (h>>>0)/4294967296;
 }
-function mulberry32(a) {
-  return function () {
-    a |= 0; a = (a + 0x6D2B79F5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+function mulberry32(a){
+  return function(){
+    a|=0;a=(a+0x6D2B79F5)|0;
+    let t=Math.imul(a^(a>>>15),1|a);
+    t=(t+Math.imul(t^(t>>>7),61|t))^t;
+    return ((t^(t>>>14))>>>0)/4294967296;
   };
 }
-function hash2(x, y, s) {
-  let h = Math.imul(x | 0, 374761393) + Math.imul(y | 0, 668265263) + Math.imul(s | 0, 1442695041);
-  h = Math.imul(h ^ (h >>> 13), 1274126177);
-  h = h ^ (h >>> 16);
-  return (h >>> 0) / 4294967296;
-}
-function fillCirclePixel(g, cx, cy, r, color) {
-  g.fillStyle = color;
-  const r2 = r * r;
-  for (let y = -r; y <= r; y++) {
-    const span = Math.floor(Math.sqrt(Math.max(0, r2 - y * y)));
-    if (span < 0) continue;
-    g.fillRect(cx - span, cy + y, span * 2 + 1, 1);
+function lerp(a,b,t){return a+(b-a)*t}
+function clamp(v,a,b){return v<a?a:(v>b?b:v)}
+
+/* ---------- 4. WEBGL SETUP ---------- */
+const glCanvas=document.getElementById('gl');
+const gl=glCanvas.getContext('webgl2',{antialias:true,alpha:false})||glCanvas.getContext('webgl',{antialias:true,alpha:false});
+if(!gl){alert('WebGL tidak didukung');throw new Error('no webgl')}
+
+function compileShader(type,src){
+  const s=gl.createShader(type);
+  gl.shaderSource(s,src);gl.compileShader(s);
+  if(!gl.getShaderParameter(s,gl.COMPILE_STATUS)){
+    console.error(gl.getShaderInfoLog(s),src);
+    throw new Error('shader');
   }
+  return s;
 }
-function drawShadowEllipse(g, cx, cy, rx, ry, color) {
-  g.fillStyle = color;
-  for (let y = -ry; y <= ry; y++) {
-    const t = 1 - (y * y) / (ry * ry);
-    if (t <= 0) continue;
-    const w = Math.round(rx * Math.sqrt(t));
-    if (w <= 0) continue;
-    g.fillRect(cx - w, cy + y, w * 2, 1);
+function createProgram(vs,fs){
+  const p=gl.createProgram();
+  gl.attachShader(p,compileShader(gl.VERTEX_SHADER,vs));
+  gl.attachShader(p,compileShader(gl.FRAGMENT_SHADER,fs));
+  gl.linkProgram(p);
+  if(!gl.getProgramParameter(p,gl.LINK_STATUS)){
+    console.error(gl.getProgramInfoLog(p));
+    throw new Error('program');
   }
+  return p;
 }
 
-/* ---------- 3. FONT 5x7 ---------- */
-const FONT_W = 5, FONT_H = 7, FONT_CW = 6, FONT_CH = 8, FONT_COLS = 16;
-const GLYPHS = {
-  'A':[0b01110,0b10001,0b10001,0b11111,0b10001,0b10001,0b10001],'B':[0b11110,0b10001,0b10001,0b11110,0b10001,0b10001,0b11110],'C':[0b01110,0b10001,0b10000,0b10000,0b10000,0b10001,0b01110],'D':[0b11110,0b10001,0b10001,0b10001,0b10001,0b10001,0b11110],'E':[0b11111,0b10000,0b10000,0b11110,0b10000,0b10000,0b11111],'F':[0b11111,0b10000,0b10000,0b11110,0b10000,0b10000,0b10000],'G':[0b01110,0b10001,0b10000,0b10111,0b10001,0b10001,0b01111],'H':[0b10001,0b10001,0b10001,0b11111,0b10001,0b10001,0b10001],'I':[0b01110,0b00100,0b00100,0b00100,0b00100,0b00100,0b01110],'J':[0b00111,0b00010,0b00010,0b00010,0b00010,0b10010,0b01100],'K':[0b10001,0b10010,0b10100,0b11000,0b10100,0b10010,0b10001],'L':[0b10000,0b10000,0b10000,0b10000,0b10000,0b10000,0b11111],'M':[0b10001,0b11011,0b10101,0b10101,0b10001,0b10001,0b10001],'N':[0b10001,0b11001,0b10101,0b10011,0b10001,0b10001,0b10001],'O':[0b01110,0b10001,0b10001,0b10001,0b10001,0b10001,0b01110],'P':[0b11110,0b10001,0b10001,0b11110,0b10000,0b10000,0b10000],'Q':[0b01110,0b10001,0b10001,0b10001,0b10101,0b10010,0b01101],'R':[0b11110,0b10001,0b10001,0b11110,0b10100,0b10010,0b10001],'S':[0b01111,0b10000,0b10000,0b01110,0b00001,0b00001,0b11110],'T':[0b11111,0b00100,0b00100,0b00100,0b00100,0b00100,0b00100],'U':[0b10001,0b10001,0b10001,0b10001,0b10001,0b10001,0b01110],'V':[0b10001,0b10001,0b10001,0b10001,0b10001,0b01010,0b00100],'W':[0b10001,0b10001,0b10001,0b10101,0b10101,0b11011,0b10001],'X':[0b10001,0b10001,0b01010,0b00100,0b01010,0b10001,0b10001],'Y':[0b10001,0b10001,0b01010,0b00100,0b00100,0b00100,0b00100],'Z':[0b11111,0b00001,0b00010,0b00100,0b01000,0b10000,0b11111],
-  '0':[0b01110,0b10001,0b10011,0b10101,0b11001,0b10001,0b01110],'1':[0b00100,0b01100,0b00100,0b00100,0b00100,0b00100,0b01110],'2':[0b01110,0b10001,0b00001,0b00010,0b00100,0b01000,0b11111],'3':[0b11111,0b00010,0b00100,0b00010,0b00001,0b10001,0b01110],'4':[0b00010,0b00110,0b01010,0b10010,0b11111,0b00010,0b00010],'5':[0b11111,0b10000,0b11110,0b00001,0b00001,0b10001,0b01110],'6':[0b00110,0b01000,0b10000,0b11110,0b10001,0b10001,0b01110],'7':[0b11111,0b00001,0b00010,0b00100,0b01000,0b01000,0b01000],'8':[0b01110,0b10001,0b10001,0b01110,0b10001,0b10001,0b01110],'9':[0b01110,0b10001,0b10001,0b01111,0b00001,0b00010,0b01100],
-  ' ':[0,0,0,0,0,0,0],'.':[0,0,0,0,0,0,0b00100],',':[0,0,0,0,0,0b00100,0b01000],'!':[0b00100,0b00100,0b00100,0b00100,0b00100,0,0b00100],'?':[0b01110,0b10001,0b00001,0b00010,0b00100,0,0b00100],'-':[0,0,0,0b11111,0,0,0],'+':[0,0b00100,0b00100,0b11111,0b00100,0b00100,0],':':[0,0b00100,0b00100,0,0b00100,0b00100,0],'/':[0b00001,0b00010,0b00010,0b00100,0b01000,0b01000,0b10000],'(':[0b00010,0b00100,0b01000,0b01000,0b01000,0b00100,0b00010],')':[0b01000,0b00100,0b00010,0b00010,0b00010,0b00100,0b01000],"'":[0b00100,0b00100,0,0,0,0,0],'"':[0b01010,0b01010,0,0,0,0,0],'*':[0,0b10101,0b01110,0b11111,0b01110,0b10101,0],'%':[0b11001,0b11010,0b00010,0b00100,0b01000,0b01011,0b10011],'<':[0b00010,0b00100,0b01000,0b10000,0b01000,0b00100,0b00010],'>':[0b01000,0b00100,0b00010,0b00001,0b00010,0b00100,0b01000],'=':[0,0,0b11111,0,0b11111,0,0],'#':[0b01010,0b01010,0b11111,0b01010,0b11111,0b01010,0b01010]
+const voxelVS=`
+attribute vec3 aPos;
+attribute vec3 aNormal;
+attribute vec3 aColor;
+uniform mat4 uVP;
+uniform vec3 uLight;
+varying vec3 vColor;
+void main(){
+  gl_Position=uVP*vec4(aPos,1.0);
+  float d=max(dot(normalize(aNormal),uLight),0.0);
+  vColor=aColor*(0.55+d*0.55);
+}`;
+const voxelFS=`
+precision mediump float;
+varying vec3 vColor;
+void main(){gl_FragColor=vec4(vColor,1.0);}`;
+const voxelProg=createProgram(voxelVS,voxelFS);
+const vLoc={
+  aPos:gl.getAttribLocation(voxelProg,'aPos'),
+  aNormal:gl.getAttribLocation(voxelProg,'aNormal'),
+  aColor:gl.getAttribLocation(voxelProg,'aColor'),
+  uVP:gl.getUniformLocation(voxelProg,'uVP'),
+  uLight:gl.getUniformLocation(voxelProg,'uLight')
 };
-const GLYPH_KEYS = Object.keys(GLYPHS);
-const GLYPH_INDEX = {};
-GLYPH_KEYS.forEach((k, i) => { GLYPH_INDEX[k] = i; });
-const fontAtlases = Object.create(null);
-function getFontAtlas(color) {
-  let a = fontAtlases[color];
-  if (a) return a;
-  const rows = Math.ceil(GLYPH_KEYS.length / FONT_COLS);
-  const cv = makeCanvas(FONT_COLS * FONT_CW, rows * FONT_CH);
-  const g = cv.getContext('2d');
-  g.fillStyle = color;
-  for (let i = 0; i < GLYPH_KEYS.length; i++) {
-    const bits = GLYPHS[GLYPH_KEYS[i]];
-    const ox = (i % FONT_COLS) * FONT_CW;
-    const oy = Math.floor(i / FONT_COLS) * FONT_CH;
-    for (let r = 0; r < FONT_H; r++) {
-      const row = bits[r];
-      for (let b = 0; b < FONT_W; b++) {
-        if (row & (1 << (FONT_W - 1 - b))) g.fillRect(ox + b, oy + r, 1, 1);
-      }
+
+const bbVS=`
+attribute vec2 aPos;
+attribute vec2 aUV;
+attribute vec4 aCS;
+attribute vec4 aTint;
+uniform mat4 uVP;
+uniform vec3 uCamR;
+uniform vec3 uCamU;
+varying vec2 vUV;
+varying vec4 vTint;
+void main(){
+  vec3 wp=aCS.xyz+uCamR*aPos.x*aCS.w+uCamU*aPos.y*aCS.w;
+  gl_Position=uVP*vec4(wp,1.0);
+  vUV=aUV;
+  vTint=aTint;
+}`;
+const bbFS=`
+precision mediump float;
+uniform sampler2D uTex;
+varying vec2 vUV;
+varying vec4 vTint;
+void main(){
+  vec4 c=texture2D(uTex,vUV);
+  if(c.a<0.1)discard;
+  gl_FragColor=vec4(c.rgb*vTint.rgb,c.a*vTint.a);
+}`;
+const bbProg=createProgram(bbVS,bbFS);
+const bLoc={
+  aPos:gl.getAttribLocation(bbProg,'aPos'),
+  aUV:gl.getAttribLocation(bbProg,'aUV'),
+  aCS:gl.getAttribLocation(bbProg,'aCS'),
+  aTint:gl.getAttribLocation(bbProg,'aTint'),
+  uVP:gl.getUniformLocation(bbProg,'uVP'),
+  uCamR:gl.getUniformLocation(bbProg,'uCamR'),
+  uCamU:gl.getUniformLocation(bbProg,'uCamU'),
+  uTex:gl.getUniformLocation(bbProg,'uTex')
+};
+
+/* ---------- 5. CANVAS SETUP & RESIZE ---------- */
+const uiCanvas=document.getElementById('ui');
+const uctx=uiCanvas.getContext('2d');
+const UI_W=320,UI_H=180;
+let uiScale=1,uiOffX=0,uiOffY=0;
+function resize(){
+  const dpr=Math.min(window.devicePixelRatio||1,2);
+  glCanvas.width=Math.floor(window.innerWidth*dpr);
+  glCanvas.height=Math.floor(window.innerHeight*dpr);
+  gl.viewport(0,0,glCanvas.width,glCanvas.height);
+  const cw=window.innerWidth,ch=window.innerHeight;
+  uiScale=Math.floor(Math.min(cw/UI_W,ch/UI_H));
+  if(uiScale<1)uiScale=1;
+  uiCanvas.width=UI_W*uiScale*dpr;
+  uiCanvas.height=UI_H*uiScale*dpr;
+  uiCanvas.style.width=(UI_W*uiScale)+'px';
+  uiCanvas.style.height=(UI_H*uiScale)+'px';
+  uiOffX=(cw-UI_W*uiScale)/2;
+  uiOffY=(ch-UI_H*uiScale)/2;
+  uiCanvas.style.left=uiOffX+'px';
+  uiCanvas.style.top=uiOffY+'px';
+  uctx.imageSmoothingEnabled=false;
+  uctx.setTransform(uiScale*dpr,0,0,uiScale*dpr,0,0);
+}
+
+/* ---------- 6. FONT 5x7 PIXEL ---------- */
+const FW=5,FH=7,FCW=6,FCH=8,FCOLS=16;
+const GLYPHS={
+  'A':[14,17,17,31,17,17,17],'B':[30,17,17,30,17,17,30],'C':[14,17,16,16,16,17,14],'D':[30,17,17,17,17,17,30],
+  'E':[31,16,16,30,16,16,31],'F':[31,16,16,30,16,16,16],'G':[14,17,16,23,17,17,15],'H':[17,17,17,31,17,17,17],
+  'I':[14,4,4,4,4,4,14],'J':[7,2,2,2,2,18,12],'K':[17,18,20,24,20,18,17],'L':[16,16,16,16,16,16,31],
+  'M':[17,27,21,21,17,17,17],'N':[17,25,21,19,17,17,17],'O':[14,17,17,17,17,17,14],'P':[30,17,17,30,16,16,16],
+  'Q':[14,17,17,17,21,18,13],'R':[30,17,17,30,20,18,17],'S':[15,16,16,14,1,1,30],'T':[31,4,4,4,4,4,4],
+  'U':[17,17,17,17,17,17,14],'V':[17,17,17,17,17,10,4],'W':[17,17,17,21,21,27,17],'X':[17,17,10,4,10,17,17],
+  'Y':[17,17,10,4,4,4,4],'Z':[31,1,2,4,8,16,31],
+  '0':[14,17,19,21,25,17,14],'1':[4,12,4,4,4,4,14],'2':[14,17,1,2,4,8,31],'3':[31,2,4,2,1,17,14],
+  '4':[2,6,10,18,31,2,2],'5':[31,16,30,1,1,17,14],'6':[6,8,16,30,17,17,14],'7':[31,1,2,4,8,8,8],
+  '8':[14,17,17,14,17,17,14],'9':[14,17,17,15,1,2,12],
+  ' ':[0,0,0,0,0,0,0],'.':[0,0,0,0,0,0,4],',':[0,0,0,0,0,4,8],'!':[4,4,4,4,4,0,4],'?':[14,17,1,2,4,0,4],
+  '-':[0,0,0,31,0,0,0],'+':[0,4,4,31,4,4,0],':':[0,4,4,0,4,4,0],'/':[1,2,2,4,8,8,16],
+  '(':[2,4,8,8,8,4,2],')':[8,4,2,2,2,4,8],"'":[4,4,0,0,0,0,0],'"':[10,10,0,0,0,0,0],
+  '*':[0,21,14,31,14,21,0],'%':[25,26,2,4,8,11,19],'<':[2,4,8,16,8,4,2],'>':[8,4,2,1,2,4,8],
+  '=':[0,0,31,0,31,0,0],'#':[10,10,31,10,31,10,10]
+};
+const GKEYS=Object.keys(GLYPHS);
+const GIDX={};
+GKEYS.forEach((k,i)=>GIDX[k]=i);
+const fontCache={};
+function getFont(color){
+  if(fontCache[color])return fontCache[color];
+  const rows=Math.ceil(GKEYS.length/FCOLS);
+  const cv=document.createElement('canvas');
+  cv.width=FCOLS*FCW;cv.height=rows*FCH;
+  const g=cv.getContext('2d');
+  g.fillStyle=color;
+  for(let i=0;i<GKEYS.length;i++){
+    const bits=GLYPHS[GKEYS[i]];
+    const ox=(i%FCOLS)*FCW,oy=Math.floor(i/FCOLS)*FCH;
+    for(let r=0;r<FH;r++)for(let b=0;b<FW;b++){
+      if(bits[r]&(1<<(FW-1-b)))g.fillRect(ox+b,oy+r,1,1);
     }
   }
-  fontAtlases[color] = cv;
+  fontCache[color]=cv;
   return cv;
 }
-function textWidth(str) { return str.length * FONT_CW - 1; }
-
-/* ---------- 4. CANVAS ---------- */
-const display = document.getElementById('game');
-const dctx = display.getContext('2d');
-dctx.imageSmoothingEnabled = false;
-const buf = makeCanvas(W, H);
-const ctx = buf.getContext('2d');
-ctx.imageSmoothingEnabled = false;
-function resize() {
-  const s = Math.max(1, Math.floor(Math.min(window.innerWidth / W, window.innerHeight / H)));
-  const dpr = Math.max(1, Math.round(window.devicePixelRatio || 1));
-  display.width = W * s * dpr;
-  display.height = H * s * dpr;
-  display.style.width = (W * s) + 'px';
-  display.style.height = (H * s) + 'px';
-  dctx.imageSmoothingEnabled = false;
-}
-function present() {
-  dctx.imageSmoothingEnabled = false;
-  dctx.drawImage(buf, 0, 0, W, H, 0, 0, display.width, display.height);
-}
-function drawText(str, x, y, color) {
-  str = String(str).toUpperCase();
-  const atlas = getFontAtlas(color);
-  let cx = Math.round(x);
-  const cy = Math.round(y);
-  for (let i = 0; i < str.length; i++) {
-    const ch = str[i];
-    const idx = GLYPH_INDEX[ch];
-    if (idx !== undefined && ch !== ' ') {
-      const sx = (idx % FONT_COLS) * FONT_CW;
-      const sy = Math.floor(idx / FONT_COLS) * FONT_CH;
-      ctx.drawImage(atlas, sx, sy, FONT_CW, FONT_CH, cx, cy, FONT_CW, FONT_CH);
+function tw(s){return s.length*FCW-1}
+function drawText(str,x,y,rgb){
+  const color='rgb('+Math.round(rgb[0]*255)+','+Math.round(rgb[1]*255)+','+Math.round(rgb[2]*255)+')';
+  const atlas=getFont(color);
+  str=String(str).toUpperCase();
+  let cx=Math.round(x);
+  const cy=Math.round(y);
+  for(let i=0;i<str.length;i++){
+    const ch=str[i],idx=GIDX[ch];
+    if(idx!==undefined&&ch!==' '){
+      const sx=(idx%FCOLS)*FCW,sy=Math.floor(idx/FCOLS)*FCH;
+      uctx.drawImage(atlas,sx,sy,FCW,FCH,cx,cy,FCW,FCH);
     }
-    cx += FONT_CW;
+    cx+=FCW;
   }
 }
-function drawTextCentered(str, cx, y, color) { drawText(str, Math.round(cx - textWidth(str) / 2), y, color); }
-function drawPanel(x, y, w, h) {
-  x = Math.round(x); y = Math.round(y); w = Math.round(w); h = Math.round(h);
-  ctx.fillStyle = 'rgba(26,20,18,0.94)';
-  ctx.fillRect(x, y, w, h);
-  ctx.fillStyle = C.uiBorder;
-  ctx.fillRect(x, y, w, 1); ctx.fillRect(x, y + h - 1, w, 1);
-  ctx.fillRect(x, y, 1, h); ctx.fillRect(x + w - 1, y, 1, h);
-  ctx.fillStyle = C.uiGold;
-  ctx.fillRect(x, y, 1, 1); ctx.fillRect(x + w - 1, y, 1, 1);
-  ctx.fillRect(x, y + h - 1, 1, 1); ctx.fillRect(x + w - 1, y + h - 1, 1, 1);
+function drawTextC(str,cx,y,rgb){drawText(str,Math.round(cx-tw(str)/2),y,rgb)}
+function panel(x,y,w,h){
+  x=Math.round(x);y=Math.round(y);w=Math.round(w);h=Math.round(h);
+  uctx.fillStyle='rgba(26,20,18,0.94)';uctx.fillRect(x,y,w,h);
+  uctx.fillStyle='rgb(243,227,200)';
+  uctx.fillRect(x,y,w,1);uctx.fillRect(x,y+h-1,w,1);
+  uctx.fillRect(x,y,1,h);uctx.fillRect(x+w-1,y,1,h);
+  uctx.fillStyle='rgb(255,207,107)';
+  uctx.fillRect(x,y,1,1);uctx.fillRect(x+w-1,y,1,1);
+  uctx.fillRect(x,y+h-1,1,1);uctx.fillRect(x+w-1,y+h-1,1,1);
 }
 
-/* ---------- 5. INPUT ---------- */
-const Input = {
-  keys: Object.create(null),
-  init() {
-    window.addEventListener('keydown', (e) => {
-      if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].indexOf(e.code) >= 0) e.preventDefault();
-      if (e.repeat) return;
-      this.keys[e.code] = true;
-      AudioSys.userGesture();
-      onKeyPressed(e.code);
-    });
-    window.addEventListener('keyup', (e) => { this.keys[e.code] = false; });
-    window.addEventListener('blur', () => { for (const k in this.keys) this.keys[k] = false; });
-  },
-  isDown(code) { return !!this.keys[code]; }
-};
-const axisVec = { x: 0, y: 0 };
-function getAxis() {
-  let x = 0, y = 0;
-  if (Input.isDown('KeyA') || Input.isDown('ArrowLeft'))  x -= 1;
-  if (Input.isDown('KeyD') || Input.isDown('ArrowRight')) x += 1;
-  if (Input.isDown('KeyW') || Input.isDown('ArrowUp'))    y -= 1;
-  if (Input.isDown('KeyS') || Input.isDown('ArrowDown'))  y += 1;
-  // Touch joystick override
-  if (Touch.active && (!invUI.open && !shop.open && !CollectionSys.open && !game.paused)) { 
-    x += Touch.axisX; y += Touch.axisY; 
-  }
-  if (x > 1) x = 1; if (x < -1) x = -1;
-  if (y > 1) y = 1; if (y < -1) y = -1;
-  axisVec.x = x; axisVec.y = y;
-  return axisVec;
-}
+/* ---------- 7. PEMAIN & DUNIA (STATE) ---------- */
+const game={state:'title',paused:false,time:0,tutorial:false,hasSave:false};
+const player={x:28,y:22,dir:'down',frame:0,animT:0,moving:false,scene:'world',vy:0};
+const camera={yaw:Math.PI, pitch:0.85, dist:9, height:3.5};
+const camPos={x:0,y:0,z:0};
+const npcs=[];
 
-/* ---------- 6. STATE GAME ---------- */
-const game = { state: 'title', paused: false, time: 0, hasSave: false, tutorialShown: false };
-
-/* ---------- 7. ITEM ---------- */
-const ITEMS = {
-  net:    { name: 'Jaring',    isTool: true, desc: 'Tangkap serangga.' },
-  rod:    { name: 'Pancing',   isTool: true, desc: 'Memancing di air.' },
-  shovel: { name: 'Sekop',     isTool: true, desc: 'Menggali tanah.' },
-  axe:    { name: 'Kapak',     isTool: true, desc: 'Menebang pohon.' },
-  water:  { name: 'Penyiram',  isTool: true, desc: 'Menyiram tanaman.' },
-  daun:   { name: 'Daun',      isTool: false, giftValue: 1, sell: 2,  desc: 'Daun segar.' },
-  bunga:  { name: 'Bunga',     isTool: false, giftValue: 3, sell: 4,  desc: 'Bunga cantik.' },
-  apel:   { name: 'Apel',      isTool: false, giftValue: 4, sell: 6,  desc: 'Apel manis.' },
-  wood:   { name: 'Kayu',      isTool: false, giftValue: 2, sell: 8,  desc: 'Kayu pohon.' },
-  fosil:  { name: 'Fosil',     isTool: false, giftValue: 5, sell: 50, desc: 'Fosil kuno.' },
-  umpan:  { name: 'Umpan',     isTool: false, giftValue: 1, sell: 3,  desc: 'Umpan pancing.' },
-  seed_bunga: { name: 'Bibit', isTool: false, giftValue: 2, sell: 5, desc: 'Bibit bunga.' },
-  ikan_kecil:  { name: 'Ikan Kecil',  isTool: false, giftValue: 3, sell: 15, category: 'fish', desc: 'Ikan mungil.' },
-  ikan_sedang: { name: 'Ikan Sedang', isTool: false, giftValue: 4, sell: 35, category: 'fish', desc: 'Ikan lumayan.' },
-  ikan_besar:  { name: 'Ikan Besar',  isTool: false, giftValue: 5, sell: 80, category: 'fish', desc: 'Ikan raksasa!' },
-  udang:       { name: 'Udang',       isTool: false, giftValue: 4, sell: 25, category: 'fish', desc: 'Udang segar.' },
-  kupu:     { name: 'Kupu-kupu', isTool: false, giftValue: 3, sell: 20, category: 'bug', desc: 'Warna-warni.' },
-  kumbang:  { name: 'Kumbang',   isTool: false, giftValue: 4, sell: 45, category: 'bug', desc: 'Kumbang kilau.' },
-  belalang: { name: 'Belalang',  isTool: false, giftValue: 3, sell: 30, category: 'bug', desc: 'Belalang hijau.' }
+/* ---------- 8. INVENTARIS & ITEM ---------- */
+const ITEMS={
+  net:{name:'Jaring',isTool:true,desc:'Tangkap serangga.'},
+  rod:{name:'Pancing',isTool:true,desc:'Memancing.'},
+  shovel:{name:'Sekop',isTool:true,desc:'Menggali.'},
+  axe:{name:'Kapak',isTool:true,desc:'Menebang.'},
+  water:{name:'Penyiram',isTool:true,desc:'Menyiram.'},
+  daun:{name:'Daun',isTool:false,gift:1,sell:2},
+  bunga:{name:'Bunga',isTool:false,gift:3,sell:4},
+  apel:{name:'Apel',isTool:false,gift:4,sell:6},
+  wood:{name:'Kayu',isTool:false,gift:2,sell:8},
+  fosil:{name:'Fosil',isTool:false,gift:5,sell:50},
+  umpan:{name:'Umpan',isTool:false,gift:1,sell:3},
+  seed:{name:'Bibit',isTool:false,gift:2,sell:5},
+  ikan_kecil:{name:'Ikan Kecil',isTool:false,gift:3,sell:15,cat:'fish'},
+  ikan_sedang:{name:'Ikan Sedang',isTool:false,gift:4,sell:35,cat:'fish'},
+  ikan_besar:{name:'Ikan Besar',isTool:false,gift:5,sell:80,cat:'fish'},
+  udang:{name:'Udang',isTool:false,gift:4,sell:25,cat:'fish'},
+  kupu:{name:'Kupu',isTool:false,gift:3,sell:20,cat:'bug'},
+  kumbang:{name:'Kumbang',isTool:false,gift:4,sell:45,cat:'bug'},
+  belalang:{name:'Belalang',isTool:false,gift:3,sell:30,cat:'bug'}
 };
-
-const ICON_DEFS = {
-  net:{palette:{'1':C.wood2,'2':C.outline,'3':'#e8e8e8'},rows:[".........3333...","........3....3..",".......3......3.",".......3......3.",".......3......3.","........3....3..",".........3333...","........1.......",".......1........","......1.........",".....1..........","....1...........","...1............","..1.............",".1..............","................"]},
-  rod:{palette:{'1':C.wood1,'2':C.wood3,'3':'#d8d8d8'},rows:["...............3","..............31",".............31.","............31..","...........31...","..........31....",".........31.....","........31......",".......31.......","......31........",".....31.........","....31..........","...31...........","..32............",".222............","................"]},
-  shovel:{palette:{'1':C.outline,'2':C.stone1,'3':C.wood2},rows:["..........33....","..........33....","..........33....","..........33....","..........33....","..........33....","..........33....","..........33....","..........33....","........111111..",".......1222221..",".......1222221..","........12221...",".........111....","................","................"]},
-  axe:{palette:{'1':C.wood2,'2':C.stone2,'3':C.stone1},rows:[".....2333.......","....233332......","...23333332.....","...23333332.....","...23333332.....","....233332......",".....2333.......","......11........","......11........","......11........","......11........","......11........","......11........","......11........","......11........","................"]},
-  water:{palette:{'1':C.outline,'2':'#6fa8d0','3':'#9fccea'},rows:["................","................","....11111.......","...1333331......","...1232321.1....","...1232321..1...","...1232321..1...","...1232321.1....","..113232311.....","..133333331.....","..133333331.....","..111111111.....","................","................","................","................"]},
-  daun:{palette:{'1':C.outline,'2':C.leaf1,'3':C.leaf3},rows:["................","................",".......1........","......121.......",".....12321......","....1233321.....","...12333321.....","..123333321.....","..12333321......","...1233321......","....12321.......",".....121........","......1.........","................","................","................"]},
-  bunga:{palette:{'1':C.outline,'2':'#f7a0c0','3':'#ffe9a8','4':C.leaf2},rows:["................","................",".....222........","....23332.......","...2333332......","....23332.......",".....242........","......4.........","......4.........",".....44.........","......4.........","......4.........","................","................","................","................"]},
-  apel:{palette:{'1':C.outline,'2':'#e05050','3':'#f08080','4':C.leaf2},rows:["................","................","......4.........",".....44.........","....1111........","...132231.......","..13222331......","..13222231......","..12222221......","..12222221......","..12222221......","...122221.......","....1111........","................","................","................"]},
-  wood:{palette:{'1':C.outline,'2':C.wood1,'3':C.wood3},rows:["................","................","................","................","...1111111111...","..122222222221..","..123232323221..","..122222222221..","..123232323221..","..122222222221..","..123232323221..","...1111111111...","................","................","................","................"]},
-  fosil:{palette:{'1':C.outline,'2':C.stone1,'3':'#7a6040'},rows:["................","................","......1111......",".....122221.....","....12333321....","....12313321....","....12313321....","....12333321....",".....122221.....","......1111......","................","................","................","................","................","................"]},
-  umpan:{palette:{'1':C.outline,'2':'#e07050','3':'#c0c0c0'},rows:["................","................","................","......111.......",".....12221......","....1222221.....","....1222221.....",".....12221......","......111.......",".......1........",".......1........","......111.......","................","................","................","................"]},
-  seed_bunga:{palette:{'1':C.outline,'2':'#a07050','3':'#f7a0c0'},rows:["................","................","................","................","......1111......",".....123321.....",".....122221.....","......1221......",".......11.......",".......1........","......111.......","................","................","................","................","................"]},
-  ikan_kecil:{palette:{'1':C.outline,'2':'#a0c0e0','3':'#e0e8f0'},rows:["................","................","................","................","................","......1111......",".....122221.....","....12322221....","....122222211...",".....122221.....","......1111......","................","................","................","................","................"]},
-  ikan_sedang:{palette:{'1':C.outline,'2':'#e0a050','3':'#f0d080'},rows:["................","................","................","................","......1111......",".....122221.....","....12322221....","...1233222221...","...1222222211...","....1222221.....",".....12221......","......111.......","................","................","................","................"]},
-  ikan_besar:{palette:{'1':C.outline,'2':'#5070a0','3':'#90a8d0'},rows:["................","................","......1111......",".....122221.....","....12322221....","...1233222221...","..123322222221..","..12322222221...","..1222222221....","...1222221......","....12221.......",".....111........","................","................","................","................"]},
-  udang:{palette:{'1':C.outline,'2':'#f08080','3':'#f0b090'},rows:["................","................","................","................","......11........",".....1221.......","....123221......","....1232221.....","....1232221.....",".....12221......","......11.1......",".........1......",".........11.....","................","................","................"]},
-  kupu:{palette:{'1':C.outline,'2':'#f0a0d0','3':'#f0e0a0'},rows:["................","................","...2.......2....","..232.....232...","..2332...2332...","...222...222....",".....12221......","......111.......",".....12221......","...222...222....","..2332...2332...","..232.....232...","...2.......2....","................","................","................"]},
-  kumbang:{palette:{'1':C.outline,'2':'#4060a0','3':'#90b0e0'},rows:["................","................","......111.......",".....12221......","....1232221.....","....1232221.....","....1222221.....","....1222221.....","....1222221.....","....1232221.....","....1232221.....",".....12221......","......111.......","................","................","................"]},
-  belalang:{palette:{'1':C.outline,'2':'#90c060','3':'#c0e090'},rows:["................","................",".........1......","........121.....",".......12321....","......123321....","......12321.....",".....12321......","....12321.......","...12321........","..12321.........","..1221..........","...11...........","................","................","................"]}
+const ITEM_COLORS={
+  net:[.55,.42,.28],rod:[.55,.42,.28],shovel:[.55,.42,.28],axe:[.55,.42,.28],water:[.4,.55,.7],
+  daun:[.35,.7,.3],bunga:[.95,.6,.75],apel:[.85,.3,.3],wood:[.7,.55,.4],fosil:[.6,.5,.35],
+  umpan:[.85,.4,.4],seed:[.65,.45,.3],
+  ikan_kecil:[.65,.75,.85],ikan_sedang:[.9,.6,.3],ikan_besar:[.3,.45,.65],udang:[.95,.5,.5],
+  kupu:[.9,.6,.8],kumbang:[.25,.35,.6],belalang:[.55,.75,.35]
 };
-const itemIcons = Object.create(null);
-function bakeItemIcons() {
-  for (const id in ICON_DEFS) {
-    const def = ICON_DEFS[id];
-    const c = makeCanvas(16, 16);
-    const g = c.getContext('2d');
-    for (let r = 0; r < def.rows.length; r++) {
-      const row = def.rows[r];
-      for (let i = 0; i < row.length; i++) {
-        const col = def.palette[row[i]];
-        if (col) { g.fillStyle = col; g.fillRect(i, r, 1, 1); }
+const inv={slots:new Array(20).fill(null),active:0,
+  add(id,n){
+    n=n||1;const item=ITEMS[id];if(!item)return false;
+    const max=item.isTool?1:99;
+    for(let i=0;i<this.slots.length;i++){
+      const s=this.slots[i];
+      if(s&&s.id===id&&s.n<max){
+        const a=Math.min(n,max-s.n);s.n+=a;n-=a;
+        if(n<=0)return true;
       }
     }
-    itemIcons[id] = c;
-  }
-}
-
-/* ---------- 8. INVENTARIS ---------- */
-const inventory = {
-  slots: new Array(20).fill(null),
-  activeTool: 0,
-  add(id, count) {
-    count = count || 1;
-    const item = ITEMS[id];
-    if (!item) return false;
-    const max = item.isTool ? 1 : 99;
-    for (let i = 0; i < this.slots.length; i++) {
-      const s = this.slots[i];
-      if (s && s.id === id && s.count < max) {
-        const add = Math.min(count, max - s.count);
-        s.count += add; count -= add;
-        if (count <= 0) return true;
-      }
-    }
-    for (let i = 0; i < this.slots.length; i++) {
-      if (!this.slots[i]) {
-        const add = Math.min(count, max);
-        this.slots[i] = { id, count: add };
-        count -= add;
-        if (count <= 0) return true;
+    for(let i=0;i<this.slots.length;i++){
+      if(!this.slots[i]){
+        const a=Math.min(n,max);
+        this.slots[i]={id,n:a};n-=a;
+        if(n<=0)return true;
       }
     }
     return false;
   },
-  removeAt(idx, count) {
-    count = count || 1;
-    const s = this.slots[idx];
-    if (!s) return false;
-    s.count -= count;
-    if (s.count <= 0) this.slots[idx] = null;
-    return true;
+  removeAt(i,n){
+    n=n||1;const s=this.slots[i];if(!s)return false;
+    s.n-=n;if(s.n<=0)this.slots[i]=null;return true;
   },
-  getActive() { return this.slots[this.activeTool]; },
-  cycleTool() {
-    for (let n = 1; n <= 5; n++) {
-      const idx = (this.activeTool + n) % 5;
-      if (this.slots[idx]) { this.activeTool = idx; return; }
+  active_item(){return this.slots[this.active]},
+  cycle(){
+    for(let k=1;k<=5;k++){
+      const i=(this.active+k)%5;
+      if(this.slots[i]){this.active=i;return}
     }
   }
 };
-const invUI = { open: false, cursor: 0, mode: 'normal' };
-const message = { text: '', timer: 0, show(text, dur) { this.text = text; this.timer = dur || 2; } };
+const invUI={open:false,cursor:0,mode:'normal'};
+const message={text:'',timer:0,show(t,d){this.text=t;this.timer=d||2}};
+const money={amount:100,add(n){this.amount+=n},spend(n){if(this.amount>=n){this.amount-=n;return true}return false}};
 
-/* ---------- 9. UANG ---------- */
-const money = { amount: 100, add(n) { this.amount += n; }, spend(n) { if (this.amount >= n) { this.amount -= n; return true; } return false; } };
-
-/* ---------- 10. TIME ---------- */
-const TimeSys = {
-  hour: 12, minute: 0, day: 1,
-  update() {
-    const d = new Date();
-    this.hour = d.getHours(); this.minute = d.getMinutes();
-    this.day = Math.floor(Date.now() / 86400000);
-  },
-  getTint() {
-    const h = this.hour + this.minute / 60;
-    if (h >= 5 && h < 7)   return { r: 255, g: 200, b: 160, a: 0.12 };
-    if (h >= 7 && h < 16)  return { r: 255, g: 240, b: 200, a: 0.00 };
-    if (h >= 16 && h < 18) return { r: 255, g: 170, b: 90,  a: 0.18 };
-    if (h >= 18 && h < 20) return { r: 90, g: 70,   b: 140, a: 0.35 };
-    return { r: 15, g: 25, b: 60, a: 0.55 };
-  },
-  getPhase() {
-    const h = this.hour;
-    if (h >= 5 && h < 10) return 'PAGI';
-    if (h >= 10 && h < 15) return 'SIANG';
-    if (h >= 15 && h < 18) return 'SORE';
-    return 'MALAM';
-  },
-  format() { return String(this.hour).padStart(2,'0') + ':' + String(this.minute).padStart(2,'0'); }
+/* ---------- 9. TIME & WEATHER ---------- */
+const TimeSys={hour:12,min:0,day:1,
+  update(){const d=new Date();this.hour=d.getHours();this.min=d.getMinutes();this.day=Math.floor(Date.now()/86400000)},
+  phase(){const h=this.hour;if(h>=5&&h<10)return'PAGI';if(h>=10&&h<15)return'SIANG';if(h>=15&&h<18)return'SORE';return'MALAM'},
+  fmt(){return String(this.hour).padStart(2,'0')+':'+String(this.min).padStart(2,'0')},
+  lightTint(){
+    const h=this.hour+this.min/60;
+    if(h>=5&&h<7)return[1.0,0.85,0.7];
+    if(h>=7&&h<16)return[1.0,1.0,0.95];
+    if(h>=16&&h<18)return[1.0,0.78,0.55];
+    if(h>=18&&h<20)return[0.55,0.5,0.75];
+    return[0.3,0.35,0.55];
+  }
 };
-
-/* ---------- 11. CUACA & PARTIKEL ---------- */
-const Weather = {
-  type: 'sunny', timer: 90, particles: [], fireflies: [],
-  update(dt) {
-    this.timer -= dt;
-    if (this.timer <= 0) {
-      this.timer = 120 + Math.random() * 180;
-      const r = Math.random();
-      if (r < 0.6) this.type = 'sunny';
-      else if (r < 0.85) this.type = 'rain';
-      else this.type = 'windy';
-      this.initParticles();
+const Weather={type:'sunny',timer:120,
+  update(dt){
+    this.timer-=dt;
+    if(this.timer<=0){
+      this.timer=120+Math.random()*180;
+      const r=Math.random();
+      this.type=r<0.6?'sunny':(r<0.85?'rain':'windy');
     }
-    for (let i = 0; i < this.particles.length; i++) {
-      const p = this.particles[i];
-      if (this.type === 'rain') {
-        p.y += p.spd * dt;
-        if (p.y > H) { p.y = -4; p.x = Math.random() * W; }
-      } else {
-        p.x += p.vx * dt;
-        p.y += p.vy * dt + Math.sin(game.time * 2 + p.ph) * 12 * dt;
-        if (p.x > W + 8) { p.x = -8; p.y = Math.random() * H; }
-      }
-    }
-    
-    // Kunang-kunang malam
-    if (player.scene === 'world' && (TimeSys.hour >= 18 || TimeSys.hour < 5)) {
-      if (this.fireflies.length < 15 && Math.random() < 0.04) {
-         this.fireflies.push({
-             x: camera.x + Math.random() * W, 
-             y: camera.y + Math.random() * H, 
-             vx: (Math.random() - 0.5) * 12, 
-             vy: (Math.random() - 0.5) * 4, 
-             life: 6 + Math.random() * 4
-         });
-      }
-    }
-    for (let i = this.fireflies.length - 1; i >= 0; i--) {
-      let f = this.fireflies[i];
-      f.x += f.vx * dt;
-      f.y += f.vy * dt + Math.sin(game.time * 2 + f.x) * 10 * dt;
-      f.life -= dt;
-      if (f.life <= 0) this.fireflies.splice(i, 1);
-    }
-  },
-  initParticles() {
-    this.particles = [];
-    if (this.type === 'rain') {
-      for (let i = 0; i < 50; i++) this.particles.push({ x: Math.random() * W, y: Math.random() * H, spd: 220 + Math.random() * 100 });
-    } else if (this.type === 'windy') {
-      for (let i = 0; i < 14; i++) this.particles.push({ x: Math.random() * W, y: Math.random() * H, vx: 40 + Math.random() * 40, vy: Math.random() * 8, ph: Math.random() * 6, color: Math.random() < 0.5 ? C.leaf1 : C.leaf3 });
-    }
-  },
-  render() {
-    if (this.type === 'rain') {
-      ctx.fillStyle = 'rgba(140,170,200,0.55)';
-      for (let i = 0; i < this.particles.length; i++) {
-        const p = this.particles[i];
-        ctx.fillRect(Math.round(p.x), Math.round(p.y), 1, 3);
-      }
-    } else if (this.type === 'windy') {
-      for (let i = 0; i < this.particles.length; i++) {
-        const p = this.particles[i];
-        ctx.fillStyle = p.color;
-        ctx.fillRect(Math.round(p.x), Math.round(p.y), 2, 1);
-      }
-    }
-  },
-  renderFireflies() {
-    if (player.scene === 'world' && (TimeSys.hour >= 18 || TimeSys.hour < 5)) {
-      ctx.fillStyle = '#dbff5c'; // kuning-kehijauan neon
-      for (let f of this.fireflies) {
-          const alpha = Math.max(0, Math.min(1, f.life)) * (0.6 + 0.4 * Math.sin(game.time * 5 + f.x));
-          ctx.globalAlpha = alpha;
-          ctx.fillRect(Math.round(f.x - camera.x), Math.round(f.y - camera.y), 2, 2);
-      }
-      ctx.globalAlpha = 1;
-    }
-  },
-  getTint() {
-    if (this.type === 'rain')  return { r: 80, g: 100, b: 130, a: 0.25 };
-    if (this.type === 'windy') return { r: 200, g: 220, b: 180, a: 0.05 };
-    return null;
   }
 };
 
-/* ---------- 12. DATA NPC ---------- */
-const RABBIT_DOWN = ["................","...11......11...","...121....121...","...131....131...","...111....111...","..11222222211...",".122222222221...",".122422224221...",".122222222221...",".122233222221...",".122222222221...","..1222222221....","...11111111....."];
-const RABBIT_UP = ["................","...11......11...","...121....121...","...131....131...","...111....111...","..11222222211...",".122222222221...",".122222222221...",".122222222221...",".122222222221...",".122222222221...","..1222222221....","...11111111....."];
-const RABBIT_SIDE = ["................","...11....11.....","...121..121.....","...131..131.....","...111..111.....","...12222221.....","..1222222221....","..1222224221....","..1222222331....","..1222222221....","..1222222221....","...12222221.....","....1111111....."];
-const BEAR_DOWN = ["................","..11........11..","..121......121..","..111111111111..",".12222222222221.",".12242222422221.",".12222222222221.",".12332222332221.",".12222222222221.",".12222222222221.","..122222222221..","..122222222221..","...1111111111..."];
-const BEAR_UP = ["................","..11........11..","..121......121..","..111111111111..",".12222222222221.",".12222222222221.",".12222222222221.",".12222222222221.",".12222222222221.",".12222222222221.","..122222222221..","..122222222221..","...1111111111..."];
-const BEAR_SIDE = ["................","...11......11...","...121....121...","...1111111111...","..122222222221..","..122222224221..","..122222222221..","..122223332221..","..122222222221..","..122222222221..","...1222222221...","...1222222221...","....11111111...."];
-const CAT_DOWN = ["................","..1..........1..","..12........21..","..121......121..","..111111111111..",".12222222222221.",".12242222422221.",".12332222332221.",".12222222222221.",".12222222222221.","..122222222221..","..122222222221..","...1111111111..."];
-const CAT_UP = ["................","..1..........1..","..12........21..","..121......121..","..111111111111..",".12222222222221.",".12222222222221.",".12222222222221.",".12222222222221.",".12222222222221.","..122222222221..","..122222222221..","...1111111111..."];
-const CAT_SIDE = ["................","...1........1...","...12......21...","...121....121...","...1111111111...","..122222222221..","..122222242221..","..122222222221..","..122223332221..","..122222222221..","...1222222221...","...1222222221...","....11111111...."];
-const DUCK_DOWN = ["................","................","....11111111....","...1222222221...","..122222222221..","..124222224221..","..122222222221..","..122223332221..","..122222222221..","...1222222221...","..122222222221..","..122222222221..","...1111111111..."];
-const DUCK_UP = ["................","................","....11111111....","...1222222221...","..122222222221..","..122222222221..","..122222222221..","..122222222221..","..122222222221..","...1222222221...","..122222222221..","..122222222221..","...1111111111..."];
-const DUCK_SIDE = ["................","................","...1111111......","..122222221.....","..1222222221....","..1222242221....","..1222222221....","..1222222331....","..1222222221....","..1222222221....","...12222221.....","...12222221.....","...1111111......"];
-
-const NPC_DEFS = [
-  { id: 'lela', name: 'MPOK LELA', personality: 'cheerful',
-    palette: { '1': '#2c1f19', '2': '#f0e0c8', '3': '#f0a0b8', '4': '#2c1f19' },
-    legColors: { pants: '#f0a0b8', shoe: '#c07888', outline: '#2c1f19' },
-    bodies: { down: RABBIT_DOWN, up: RABBIT_UP, side: RABBIT_SIDE },
-    spawnX: 456, spawnY: 424,
-    greetings: { stranger: ['HALO! BUNGA DI SINI CANTIK YA~','KAMU ORANG BARU YA? SELAMAT DATANG!'], acquainted: ['EH, KAMU LAGI! MAU MAIN?'], friendly: ['KAMU TEMAN BAIKKU! AKU SENANG SEKALI~','BUNGA-BUNGA INI UNTUKMU, HEHE.'] } },
-  { id: 'bimo', name: 'PAK BIMO', personality: 'gruff',
-    palette: { '1': '#2e1e14', '2': '#a06840', '3': '#d8b088', '4': '#1a0e08' },
-    legColors: { pants: '#6b4429', shoe: '#4a2a18', outline: '#2e1e14' },
-    bodies: { down: BEAR_DOWN, up: BEAR_UP, side: BEAR_SIDE },
-    spawnX: 536, spawnY: 360,
-    greetings: { stranger: ['HMM? ADA APA, NAK?','AKU SEDANG MEMIKIRKAN SESUATU.'], acquainted: ['OH, KAMU. ADA YANG BISA AKU BANTU?'], friendly: ['KAMU ANAK BAIK. AKU SENANG KAMU DI SINI.'] } },
-  { id: 'nyo', name: 'NYO', personality: 'sleepy',
-    palette: { '1': '#2a1a10', '2': '#e08a4a', '3': '#f0d8a8', '4': '#2a1a10' },
-    legColors: { pants: '#8a6ab0', shoe: '#5a4070', outline: '#2a1a10' },
-    bodies: { down: CAT_DOWN, up: CAT_UP, side: CAT_SIDE },
-    spawnX: 424, spawnY: 408,
-    greetings: { stranger: ['NYAA... NGANTUK... ADA APA?','BIARKAN AKU TIDUR...'], acquainted: ['NYA~ KAMU DATANG LAGI...'], friendly: ['NYAA~ AKU SENANG KAMU DI SINI...','TEMANI AKU TIDUR SIANG, NYA~'] } },
-  { id: 'kwek', name: 'IBU KWEK', personality: 'motherly',
-    palette: { '1': '#2c1f19', '2': '#f0d868', '3': '#f09030', '4': '#2c1f19' },
-    legColors: { pants: '#6fa8d0', shoe: '#f09030', outline: '#2c1f19' },
-    bodies: { down: DUCK_DOWN, up: DUCK_UP, side: DUCK_SIDE },
-    spawnX: 520, spawnY: 424,
-    greetings: { stranger: ['EH, HALO SAYANG! SUDAH MAKAN?','HATI-HATI DI JALAN YA~'], acquainted: ['ADUH, KAMU KESINI LAGI! MAKAN DULU?'], friendly: ['KAMU SEPERTI ANAKKU SENDIRI~','KALAU BUTUH APA-APA, DATANG SAJA YA!'] } }
+/* ---------- 10. DATA SPRITE KARAKTER (2D, untuk billboard) ---------- */
+const PAL_PLAYER={'1':[.23,.16,.13],'2':[.96,.78,.62],'4':[.42,.28,.18],'5':[.88,.48,.35],'6':[.75,.35,.25]};
+const PLAYER_DOWN=[
+"................","...1111111111...","..144444444441..","..144444444441..",
+"..142222222241..","..142122221241..","..142222222241..","...1111111111...",
+"...1555555551...","..125555555521..","..125555555521..","..125555555521..",
+"...1555555551..."
+];
+const PLAYER_UP=[
+"................","...1111111111...","..144444444441..","..144444444441..",
+"..144444444441..","..144444444441..","..144444444441..","...1111111111...",
+"...1555555551...","..125555555521..","..125555555521..","..125555555521..",
+"...1555555551..."
+];
+const PLAYER_SIDE=[
+"................","....111111111...","...14444444441..","...14444444441..",
+"...12224444441..","...12124444441..","...12224444441..","....111111111...",
+"...1555555551...","..125555555521..","..125555555521..","..125555555521..",
+"...1555555551..."
+];
+const NPC_DEFS=[
+  {id:'lela',name:'MPOK LELA',personality:'cheerful',spawnX:28.5,spawnY:26.5,
+    pal:{'1':[.23,.16,.13],'2':[.94,.88,.78],'3':[.94,.63,.72],'4':[.23,.16,.13]},
+    legs:[.94,.63,.72],
+    body:["................","...11......11...","...121....121...","...131....131...","...111....111...","..11222222211...",".122222222221...",".122422224221...",".122222222221...",".122233222221...",".122222222221...","..1222222221....","...11111111....."],
+    greet:{s:['HALO! BUNGA DI SINI CANTIK YA~','KAMU ORANG BARU YA?'],a:['EH KAMU LAGI!'],f:['KAMU TEMAN BAIKKU!']}
+  },
+  {id:'bimo',name:'PAK BIMO',personality:'gruff',spawnX:33.5,spawnY:22.5,
+    pal:{'1':[.18,.12,.08],'2':[.63,.41,.25],'3':[.85,.69,.53],'4':[.10,.06,.04]},
+    legs:[.42,.27,.16],
+    body:["................","..11........11..","..121......121..","..111111111111..",".12222222222221.",".12242222422221.",".12222222222221.",".12332222332221.",".12222222222221.",".12222222222221.","..122222222221..","..122222222221..","...1111111111..."],
+    greet:{s:['HMM? ADA APA NAK?'],a:['OH KAMU. ADA APA?'],f:['KAMU ANAK BAIK.']}
+  },
+  {id:'nyo',name:'NYO',personality:'sleepy',spawnX:26.5,spawnY:25.5,
+    pal:{'1':[.17,.10,.06],'2':[.88,.54,.29],'3':[.94,.85,.66],'4':[.17,.10,.06]},
+    legs:[.54,.42,.69],
+    body:["................","..1..........1..","..12........21..","..121......121..","..111111111111..",".12222222222221.",".12242222422221.",".12332222332221.",".12222222222221.",".12222222222221.","..122222222221..","..122222222221..","...1111111111..."],
+    greet:{s:['NYAA... NGANTUK...'],a:['NYA~ KAMU LAGI...'],f:['NYAA~ SENANG KAMU DI SINI...']}
+  },
+  {id:'kwek',name:'IBU KWEK',personality:'motherly',spawnX:32.5,spawnY:26.5,
+    pal:{'1':[.23,.16,.13],'2':[.94,.85,.41],'3':[.94,.56,.19],'4':[.23,.16,.13]},
+    legs:[.44,.65,.82],
+    body:["................","................","....11111111....","...1222222221...","..122222222221..","..124222224221..","..122222222221..","..122223332221..","..122222222221..","...1222222221...","..122222222221..","..122222222221..","...1111111111..."],
+    greet:{s:['HALO SAYANG! SUDAH MAKAN?'],a:['KAMU KESINI LAGI!'],f:['KAMU SEPERTI ANAKKU~']}
+  }
 ];
 
-/* ---------- 13. ASSET BAKING ---------- */
-const assets = { grass: [], path: [], sand: null, water: [], tree: [], bush: null, rock: null, flower: [], house: null, player: null, sign: null, floor: [], wall: null };
-function bakeGrassTile(seed) {
-  const c = makeCanvas(TILE, TILE);
-  const g = c.getContext('2d');
-  g.fillStyle = C.grass1; g.fillRect(0, 0, TILE, TILE);
-  for (let y = 0; y < TILE; y++) for (let x = 0; x < TILE; x++) {
-    const n = hash2(x, y, seed);
-    if (n > 0.91) { g.fillStyle = C.grass3; g.fillRect(x, y, 1, 1); }
-    else if (n < 0.07) { g.fillStyle = C.grass2; g.fillRect(x, y, 1, 1); }
+/* ---------- 11. BAKING SPRITE ATLAS (untuk billboard WebGL) ---------- */
+const ATLAS_W=16*4, ATLAS_H=16*16; // 4 kolom (frame) x N baris (16 per karakter untuk 4 dir? no — 4 frame per dir, 4 dir = 16 sprites)
+const spriteUV={};
+let atlasCanvas=null;
+function bakeSpriteAtlas(){
+  atlasCanvas=document.createElement('canvas');
+  atlasCanvas.width=16*8; // 8 kolom untuk muat 4 frame x 4 dir... hmm
+  atlasCanvas.height=16*8;
+  const g=atlasCanvas.getContext('2d');
+  g.imageSmoothingEnabled=false;
+  let row=0;
+  function drawSprite(rows,pal,x,y){
+    for(let r=0;r<rows.length&&r<16;r++){
+      const line=rows[r];
+      for(let c=0;c<line.length&&c<16;c++){
+        const ch=line[c];
+        if(ch==='.'||ch==='0')continue;
+        const col=pal[ch];
+        if(!col)continue;
+        g.fillStyle='rgb('+Math.round(col[0]*255)+','+Math.round(col[1]*255)+','+Math.round(col[2]*255)+')';
+        g.fillRect(x+c,y+r,1,1);
+      }
+    }
+    // legs
+    g.fillStyle='rgb(74,111,165)';g.fillRect(x+4,y+13,8,1);g.fillRect(x+4,y+14,8,1);
+    g.fillStyle='rgb(58,42,34)';g.fillRect(x+3,y+15,4,1);g.fillRect(x+9,y+15,4,1);
   }
-  return c;
-}
-function bakePathTile(seed) {
-  const c = makeCanvas(TILE, TILE);
-  const g = c.getContext('2d');
-  g.fillStyle = C.path1; g.fillRect(0, 0, TILE, TILE);
-  for (let y = 0; y < TILE; y++) for (let x = 0; x < TILE; x++) {
-    const n = hash2(x, y, seed);
-    if (n > 0.90) { g.fillStyle = C.path3; g.fillRect(x, y, 1, 1); }
-    else if (n < 0.09) { g.fillStyle = C.path2; g.fillRect(x, y, 1, 1); }
-  }
-  g.fillStyle = C.path2; g.fillRect(3, 5, 2, 1); g.fillRect(11, 11, 2, 1);
-  return c;
-}
-function bakeSandTile() {
-  const c = makeCanvas(TILE, TILE);
-  const g = c.getContext('2d');
-  g.fillStyle = C.sand1; g.fillRect(0, 0, TILE, TILE);
-  for (let y = 0; y < TILE; y++) for (let x = 0; x < TILE; x++) {
-    if (hash2(x, y, 91) > 0.90) { g.fillStyle = C.sand2; g.fillRect(x, y, 1, 1); }
-  }
-  return c;
-}
-function bakeWaterTile(v, frame) {
-  const c = makeCanvas(TILE, TILE);
-  const g = c.getContext('2d');
-  g.fillStyle = C.water1; g.fillRect(0, 0, TILE, TILE);
-  const off = frame * 2 + v * 5;
-  for (let i = 0; i < 3; i++) {
-    const yy = ((i * 5 + off) % 16 + 16) % 16;
-    const xx = ((i * 6 + off * 2) % 16 + 16) % 16;
-    g.fillStyle = C.water2; g.fillRect(xx, yy, 5, 1);
-    g.fillStyle = C.water3; g.fillRect(xx + 1, yy, 3, 1);
-  }
-  g.fillStyle = C.water4;
-  g.fillRect((off * 3) % 16, (off * 5) % 16, 2, 1);
-  return c;
-}
-function bakeTree(v) {
-  const c = makeCanvas(32, 42);
-  const g = c.getContext('2d');
-  drawShadowEllipse(g, 16, 39, 11, 4, 'rgba(20,15,10,0.3)');
-  g.fillStyle = C.outline; g.fillRect(13, 21, 7, 19);
-  g.fillStyle = C.trunk1; g.fillRect(14, 22, 5, 18);
-  g.fillStyle = C.trunk2; g.fillRect(17, 22, 2, 18);
-  const cx = 16, cy = 16, r = 13;
-  fillCirclePixel(g, cx, cy, r + 1, C.outline);
-  fillCirclePixel(g, cx, cy, r, C.leaf4);
-  fillCirclePixel(g, cx - 3, cy - 2, r - 3, C.leaf1);
-  fillCirclePixel(g, cx - 2, cy - 4, r - 6, C.leaf2);
-  fillCirclePixel(g, cx - 1, cy - 5, r - 9, C.leaf3);
-  if (v === 1) { g.fillStyle = '#f2a2a2'; g.fillRect(9, 14, 2, 2); g.fillRect(19, 19, 2, 2); g.fillRect(14, 23, 2, 2); }
-  else if (v === 2) { g.fillStyle = C.leaf3; g.fillRect(10, 18, 2, 1); g.fillRect(20, 12, 2, 1); }
-  return c;
-}
-function bakeBush() {
-  const c = makeCanvas(16, 16);
-  const g = c.getContext('2d');
-  drawShadowEllipse(g, 8, 14, 6, 2, 'rgba(20,15,10,0.25)');
-  fillCirclePixel(g, 8, 9, 6, C.outline);
-  fillCirclePixel(g, 8, 9, 5, C.leaf4);
-  fillCirclePixel(g, 7, 8, 4, C.leaf1);
-  fillCirclePixel(g, 6, 7, 2, C.leaf2);
-  return c;
-}
-function bakeRock() {
-  const c = makeCanvas(16, 16);
-  const g = c.getContext('2d');
-  drawShadowEllipse(g, 8, 14, 6, 2, 'rgba(20,15,10,0.25)');
-  fillCirclePixel(g, 8, 10, 5, C.outline);
-  fillCirclePixel(g, 8, 10, 4, C.stone2);
-  fillCirclePixel(g, 7, 9, 3, C.stone1);
-  fillCirclePixel(g, 6, 8, 1, C.stone3);
-  return c;
-}
-function bakeFlower(color, frame) {
-  const c = makeCanvas(16, 16);
-  const g = c.getContext('2d');
-  const sw = frame;
-  g.fillStyle = C.leaf4; g.fillRect(7 + sw, 10, 1, 4);
-  g.fillStyle = C.leaf1; g.fillRect(5 + sw, 12, 2, 1); g.fillRect(9 + sw, 11, 2, 1);
-  g.fillStyle = color;
-  g.fillRect(7 + sw, 6, 3, 1); g.fillRect(6 + sw, 7, 5, 1); g.fillRect(7 + sw, 8, 3, 1);
-  g.fillStyle = '#ffe9a8'; g.fillRect(8 + sw, 7, 1, 1);
-  return c;
-}
-function bakeHouse() {
-  const c = makeCanvas(64, 56);
-  const g = c.getContext('2d');
-  drawShadowEllipse(g, 32, 52, 30, 5, 'rgba(20,15,10,0.3)');
-  g.fillStyle = C.outline; g.fillRect(4, 26, 56, 26);
-  g.fillStyle = C.wall1; g.fillRect(5, 27, 54, 24);
-  g.fillStyle = C.wall2; g.fillRect(5, 45, 54, 6);
-  g.fillStyle = C.wood2; g.fillRect(5, 27, 54, 1); g.fillRect(8, 27, 2, 24); g.fillRect(54, 27, 2, 24); g.fillRect(5, 44, 54, 1);
-  g.fillStyle = C.outline; g.fillRect(24, 32, 16, 20);
-  g.fillStyle = C.wood2; g.fillRect(25, 33, 14, 19);
-  g.fillStyle = C.wood1; g.fillRect(26, 34, 12, 18);
-  g.fillStyle = C.wood3; g.fillRect(30, 34, 1, 18);
-  g.fillStyle = C.uiGold; g.fillRect(36, 43, 2, 2);
-  for (const wx of [10, 44]) {
-    g.fillStyle = C.outline; g.fillRect(wx - 1, 32, 12, 10);
-    g.fillStyle = C.glass; g.fillRect(wx, 33, 10, 8);
-    g.fillStyle = C.glass2; g.fillRect(wx + 1, 34, 4, 3);
-    g.fillStyle = C.wood2; g.fillRect(wx + 4, 33, 1, 8); g.fillRect(wx, 36, 10, 1);
-  }
-  for (let y = 1; y <= 31; y++) {
-    const t = (y - 1) / 30;
-    const l = Math.round(12 - 14 * t) - 1;
-    const r = Math.round(52 + 14 * t) + 1;
-    g.fillStyle = C.outline; g.fillRect(l, y, r - l + 1, 1);
-  }
-  for (let y = 2; y <= 30; y++) {
-    const t = (y - 2) / 28;
-    const l = Math.round(13 - 14 * t);
-    const r = Math.round(51 + 14 * t);
-    g.fillStyle = ((y - 2) % 5 === 4) ? C.roof2 : C.roof1;
-    g.fillRect(l, y, r - l + 1, 1);
-  }
-  g.fillStyle = C.roof3;
-  for (let y = 4; y <= 12; y++) {
-    const t = (y - 2) / 28;
-    const l = Math.round(13 - 14 * t);
-    g.fillRect(l + 2, y, 5, 1);
-  }
-  return c;
-}
-function bakeSign() {
-  const c = makeCanvas(16, 22);
-  const g = c.getContext('2d');
-  drawShadowEllipse(g, 8, 21, 6, 1.5, 'rgba(20,15,10,0.3)');
-  g.fillStyle = C.outline; g.fillRect(3, 4, 10, 12);
-  g.fillStyle = C.wood1; g.fillRect(4, 5, 8, 10);
-  g.fillStyle = C.wood3; g.fillRect(5, 7, 6, 1); g.fillRect(5, 9, 4, 1); g.fillRect(5, 11, 5, 1);
-  g.fillStyle = C.outline; g.fillRect(7, 15, 2, 6);
-  g.fillStyle = C.wood2; g.fillRect(8, 15, 1, 6);
-  return c;
-}
-function bakeFloor(v) {
-  const c = makeCanvas(TILE, TILE);
-  const g = c.getContext('2d');
-  g.fillStyle = (v & 1) ? C.floor1 : C.floor2; g.fillRect(0, 0, TILE, TILE);
-  g.fillStyle = C.floorLine; g.fillRect(0, 0, TILE, 1); g.fillRect(0, 0, 1, TILE);
-  return c;
-}
-function bakeWall() {
-  const c = makeCanvas(TILE, TILE);
-  const g = c.getContext('2d');
-  g.fillStyle = C.wallTop; g.fillRect(0, 0, TILE, TILE);
-  g.fillStyle = C.wallBot; g.fillRect(0, 12, TILE, 4);
-  g.fillStyle = 'rgba(0,0,0,0.15)'; g.fillRect(0, 14, TILE, 1);
-  return c;
-}
-const LEG_FRAMES = [{ l: 0, r: 0 },{ l: -1, r: 1 },{ l: 0, r: 0 },{ l: 1, r: -1 }];
-function drawLegsStyled(g, frame, pants, shoe, outline) {
-  const L = LEG_FRAMES[frame].l, R = LEG_FRAMES[frame].r;
-  g.fillStyle = outline; g.fillRect(3, 13, 10, 1);
-  g.fillStyle = pants; g.fillRect(4, 13, 8, 1); g.fillRect(4, 14, 8, 1);
-  g.fillStyle = outline; g.fillRect(3, 14, 1, 1); g.fillRect(12, 14, 1, 1);
-  g.fillStyle = outline; g.fillRect(3 + L, 15, 1, 1);
-  g.fillStyle = shoe; g.fillRect(4 + L, 15, 3, 1);
-  g.fillStyle = outline; g.fillRect(7 + L, 15, 1, 1);
-  g.fillStyle = outline; g.fillRect(8 + R, 15, 1, 1);
-  g.fillStyle = shoe; g.fillRect(9 + R, 15, 3, 1);
-  g.fillStyle = outline; g.fillRect(12 + R, 15, 1, 1);
-}
-function bakeCharacterFrame(bodyRows, frame, flip, palette, legColors) {
-  const c = makeCanvas(16, 16);
-  const g = c.getContext('2d');
-  for (let r = 0; r < bodyRows.length; r++) {
-    const row = bodyRows[r];
-    for (let i = 0; i < row.length; i++) {
-      const col = palette[row[i]];
-      if (col) { g.fillStyle = col; g.fillRect(i, r, 1, 1); }
+  // Player: 4 dirs x 4 frames
+  for(let d=0;d<4;d++){
+    const rows=d===0?PLAYER_DOWN:(d===1?PLAYER_UP:PLAYER_SIDE);
+    for(let f=0;f<4;f++){
+      drawSprite(rows,PAL_PLAYER,f*16,d*16);
     }
   }
-  drawLegsStyled(g, frame, legColors.pants, legColors.shoe, legColors.outline);
-  if (!flip) return c;
-  const f = makeCanvas(16, 16);
-  const fg = f.getContext('2d');
-  fg.imageSmoothingEnabled = false;
-  fg.translate(16, 0); fg.scale(-1, 1);
-  fg.drawImage(c, 0, 0);
-  return f;
-}
-function bakeSpriteSet(bodies, palette, legColors, sideIsLeft) {
-  const out = { down: [], up: [], left: [], right: [] };
-  for (let f = 0; f < 4; f++) {
-    out.down.push(bakeCharacterFrame(bodies.down, f, false, palette, legColors));
-    out.up.push(bakeCharacterFrame(bodies.up, f, false, palette, legColors));
-    if (sideIsLeft) {
-      out.left.push(bakeCharacterFrame(bodies.side, f, false, palette, legColors));
-      out.right.push(bakeCharacterFrame(bodies.side, f, true, palette, legColors));
-    } else {
-      out.right.push(bakeCharacterFrame(bodies.side, f, false, palette, legColors));
-      out.left.push(bakeCharacterFrame(bodies.side, f, true, palette, legColors));
-    }
-  }
-  return out;
-}
-const PLAYER_PAL = { '1': C.outline, '2': C.skin, '4': C.hair, '5': C.shirt, '6': C.shirtS, '7': C.pants, '9': C.shoe };
-const PLAYER_BODY = {
-  down: ["................","...1111111111...","..144444444441..","..144444444441..","..142222222241..","..142122221241..","..142222222241..","...1111111111...","...1555555551...","..125555555521..","..125555555521..","..125555555521..","...1555555551..."],
-  up: ["................","...1111111111...","..144444444441..","..144444444441..","..144444444441..","..144444444441..","..144444444441..","...1111111111...","...1555555551...","..125555555521..","..125555555521..","..125555555521..","...1555555551..."],
-  side: ["................","....111111111...","...14444444441..","...14444444441..","...12224444441..","...12124444441..","...12224444441..","....111111111...","...1555555551...","..125555555521..","..125555555521..","..125555555521..","...1555555551..."]
-};
-let playerShadow = null;
-function bakePlayerShadow() {
-  const c = makeCanvas(16, 8);
-  const g = c.getContext('2d');
-  drawShadowEllipse(g, 8, 4, 6, 3, 'rgba(20,15,10,0.3)');
-  playerShadow = c;
-}
-const bugSprites = {};
-function bakeBugSprites() {
-  for (const f of [0, 1]) {
-    const c = makeCanvas(12, 12);
-    const g = c.getContext('2d');
-    const spread = f ? 2 : 3;
-    g.fillStyle = '#f0a0d0'; g.fillRect(4 - spread, 3, spread, 4); g.fillRect(8, 3, spread, 4);
-    g.fillStyle = '#f0e0a0'; g.fillRect(5 - spread, 7, spread - 1, 2); g.fillRect(8, 7, spread - 1, 2);
-    g.fillStyle = '#2c1f19'; g.fillRect(5, 3, 2, 7); g.fillRect(5, 2, 2, 1);
-    bugSprites['kupu_' + f] = c;
-  }
-  for (const f of [0, 1]) {
-    const c = makeCanvas(12, 12);
-    const g = c.getContext('2d');
-    g.fillStyle = '#4060a0'; g.fillRect(4, 4, 4, 5);
-    g.fillStyle = '#90b0e0'; g.fillRect(5, 5, 2, 3);
-    g.fillStyle = '#2c1f19'; g.fillRect(3, 4, 6, 1); g.fillRect(4, 3, 1, 1); g.fillRect(7, 3, 1, 1);
-    if (f) { g.fillRect(3, 2, 1, 1); g.fillRect(8, 2, 1, 1); } else { g.fillRect(4, 2, 1, 1); g.fillRect(7, 2, 1, 1); }
-    bugSprites['kumbang_' + f] = c;
-  }
-  for (const f of [0, 1]) {
-    const c = makeCanvas(12, 12);
-    const g = c.getContext('2d');
-    g.fillStyle = '#90c060'; g.fillRect(3, f ? 4 : 5, 7, 3);
-    g.fillStyle = '#c0e090'; g.fillRect(4, f ? 5 : 6, 5, 1);
-    g.fillStyle = '#2c1f19'; g.fillRect(2, f ? 4 : 5, 1, 1); g.fillRect(8, f ? 2 : 3, 1, 3); g.fillRect(6, f ? 7 : 8, 1, 2); g.fillRect(4, f ? 7 : 8, 1, 2);
-    bugSprites['belalang_' + f] = c;
-  }
-}
-function bakeAllAssets() {
-  assets.grass = [bakeGrassTile(3), bakeGrassTile(17), bakeGrassTile(29)];
-  assets.path = [bakePathTile(41), bakePathTile(53)];
-  assets.sand = bakeSandTile();
-  assets.water = [];
-  for (let v = 0; v < 3; v++) { const frames = []; for (let f = 0; f < 3; f++) frames.push(bakeWaterTile(v, f)); assets.water.push(frames); }
-  assets.tree = [bakeTree(0), bakeTree(1), bakeTree(2)];
-  assets.bush = bakeBush(); assets.rock = bakeRock();
-  const flowerColors = ['#f2a2c0', '#f7d774', '#c8a8f0', '#f7a08a', '#ffffff'];
-  assets.flower = flowerColors.map(col => [bakeFlower(col, 0), bakeFlower(col, 1)]);
-  assets.house = bakeHouse(); assets.sign = bakeSign();
-  assets.floor = [bakeFloor(0), bakeFloor(1)]; assets.wall = bakeWall();
-  assets.player = bakeSpriteSet(PLAYER_BODY, PLAYER_PAL, { pants: C.pants, shoe: C.shoe, outline: C.outline }, true);
-  bakePlayerShadow(); bakeItemIcons(); bakeBugSprites();
-}
-
-/* ---------- 14. PETA ---------- */
-const ground = new Uint8Array(MAP_W * MAP_H);
-const solid = new Uint8Array(MAP_W * MAP_H);
-const occupied = new Uint8Array(MAP_W * MAP_H);
-const waterVariant = new Uint8Array(MAP_W * MAP_H);
-let objects = [];
-let flowers = [];
-let worldGround = null;
-let shopSign = null;
-
-function setTile(tx, ty, type) { if (tx < 0 || ty < 0 || tx >= MAP_W || ty >= MAP_H) return; ground[ty * MAP_W + tx] = type; }
-function getTile(tx, ty) { if (tx < 0 || ty < 0 || tx >= MAP_W || ty >= MAP_H) return -1; return ground[ty * MAP_W + tx]; }
-function canPlace(tx, ty) { if (tx < 0 || ty < 0 || tx >= MAP_W || ty >= MAP_H) return false; const i = ty * MAP_W + tx; if (ground[i] !== T.GRASS) return false; if (occupied[i]) return false; return true; }
-function addObject(img, tx, ty, collW, collH, collOffY) {
-  const x = tx * TILE + 8 - (img.width >> 1);
-  const y = ty * TILE + TILE - img.height;
-  const sortY = ty * TILE + TILE;
-  let coll = null;
-  if (collW > 0) coll = { x: tx * TILE + 8 - (collW >> 1), y: ty * TILE + TILE - collOffY - collH, w: collW, h: collH };
-  const o = { x, y, img, sortY, coll, type: 'prop' };
-  objects.push(o); return o;
-}
-function addTree(tx, ty, variant) {
-  if (!canPlace(tx, ty)) return;
-  occupied[ty * MAP_W + tx] = 1; solid[ty * MAP_W + tx] = 1;
-  const o = addObject(assets.tree[variant % assets.tree.length], tx, ty, 10, 12, 4);
-  o.type = 'tree'; o.hp = 3; o.tileX = tx; o.tileY = ty; o.variant = variant;
-}
-function addBush(tx, ty) { if (!canPlace(tx, ty)) return; occupied[ty * MAP_W + tx] = 1; solid[ty * MAP_W + tx] = 1; addObject(assets.bush, tx, ty, 12, 10, 3); }
-function addRock(tx, ty) { if (!canPlace(tx, ty)) return; occupied[ty * MAP_W + tx] = 1; solid[ty * MAP_W + tx] = 1; addObject(assets.rock, tx, ty, 12, 10, 3); }
-function addFlower(tx, ty, v) {
-  if (!canPlace(tx, ty)) return;
-  occupied[ty * MAP_W + tx] = 1;
-  flowers.push({ x: tx * TILE, y: ty * TILE, img: assets.flower[v % assets.flower.length], phase: hash2(tx, ty, 5) * 2 });
-}
-function generateWorld() {
-  const rng = mulberry32(20240607);
-  for (let i = 0; i < MAP_W * MAP_H; i++) ground[i] = T.GRASS;
-  solid.fill(0); occupied.fill(0); waterVariant.fill(0);
-  for (let tx = 3; tx <= 60; tx++) { setTile(tx, 24, T.PATH); setTile(tx, 25, T.PATH); }
-  for (let ty = 3; ty <= 45; ty++) { setTile(30, ty, T.PATH); setTile(31, ty, T.PATH); }
-  for (let ty = 21; ty <= 27; ty++) for (let tx = 27; tx <= 34; tx++) setTile(tx, ty, T.PATH);
-  for (let ty = 0; ty < MAP_H; ty++) for (let tx = 0; tx < MAP_W; tx++) {
-    const dx = (tx - 47) / 10.5, dy = (ty - 11) / 6.5;
-    const d = dx * dx + dy * dy;
-    if (d <= 1) { setTile(tx, ty, T.WATER); waterVariant[ty * MAP_W + tx] = (hash2(tx, ty, 13) * 3) | 0; }
-    else if (d <= 1.45 && getTile(tx, ty) === T.GRASS) setTile(tx, ty, T.SAND);
-  }
-  for (let ty = 0; ty < MAP_H; ty++) for (let tx = 0; tx < MAP_W; tx++) {
-    const i = ty * MAP_W + tx;
-    if (ground[i] === T.WATER) solid[i] = 1;
-    if (tx === 0 || ty === 0 || tx === MAP_W - 1 || ty === MAP_H - 1) solid[i] = 1;
-  }
-  const HOUSE_TX = 27, HOUSE_TY = 20;
-  const hx = HOUSE_TX * TILE + 8 - (assets.house.width >> 1);
-  const hy = HOUSE_TY * TILE + TILE - assets.house.height;
-  objects.push({ x: hx, y: hy, img: assets.house, sortY: HOUSE_TY * TILE + TILE, coll: { x: hx + 2, y: hy + 30, w: 60, h: 26 }, type: 'house', doorX: hx + 32, doorY: hy + 44 });
-  for (let ty = 18; ty <= 20; ty++) for (let tx = 25; tx <= 29; tx++) {
-    if (tx >= 0 && tx < MAP_W && ty >= 0 && ty < MAP_H) { occupied[ty * MAP_W + tx] = 1; solid[ty * MAP_W + tx] = 1; }
-  }
-  const signX = 34 * TILE + 8, signY = 22 * TILE + TILE;
-  shopSign = { x: signX - 8, y: signY - 22, img: assets.sign, sortY: signY, coll: { x: signX - 5, y: signY - 6, w: 10, h: 6 }, type: 'shop', cx: signX, cy: signY };
-  objects.push(shopSign);
-  for (let tx = 0; tx < MAP_W; tx++) for (const ty of [0, 1, MAP_H - 2, MAP_H - 1]) if (rng() < 0.72) addTree(tx, ty, (rng() * 3) | 0);
-  for (let ty = 0; ty < MAP_H; ty++) for (const tx of [0, 1, MAP_W - 2, MAP_W - 1]) if (rng() < 0.72) addTree(tx, ty, (rng() * 3) | 0);
-  for (let n = 0; n < 90; n++) { const tx = 2 + ((rng() * (MAP_W - 4)) | 0); const ty = 2 + ((rng() * (MAP_H - 4)) | 0); if (canPlace(tx, ty) && rng() < 0.55) addTree(tx, ty, (rng() * 3) | 0); }
-  for (let n = 0; n < 70; n++) { const tx = 2 + ((rng() * (MAP_W - 4)) | 0); const ty = 2 + ((rng() * (MAP_H - 4)) | 0); if (canPlace(tx, ty)) { if (rng() < 0.6) addBush(tx, ty); else addRock(tx, ty); } }
-  for (let ty = 2; ty < MAP_H - 2; ty++) for (let tx = 2; tx < MAP_W - 2; tx++) { if (getTile(tx, ty) !== T.GRASS) continue; if (rng() < 0.055) addFlower(tx, ty, (rng() * 5) | 0); }
-  clearSpawnArea(27, 21, 5, 4);
-}
-function clearSpawnArea(tx, ty, w, h) {
-  for (let y = ty; y < ty + h; y++) for (let x = tx; x < tx + w; x++) { if (x < 0 || y < 0 || x >= MAP_W || y >= MAP_H) continue; solid[y * MAP_W + x] = 0; occupied[y * MAP_W + x] = 1; }
-  const bx = tx * TILE, by = ty * TILE, bw = w * TILE, bh = h * TILE;
-  objects = objects.filter(o => {
-    if (!o.coll || o.type === 'house' || o.type === 'shop') return true;
-    return !(o.coll.x < bx + bw && o.coll.x + o.coll.w > bx && o.coll.y < by + bh && o.coll.y + o.coll.h > by);
-  });
-}
-function bakeWorldCanvas() {
-  const wc = makeCanvas(WORLD_W, WORLD_H);
-  const g = wc.getContext('2d');
-  g.imageSmoothingEnabled = false;
-  for (let ty = 0; ty < MAP_H; ty++) for (let tx = 0; tx < MAP_W; tx++) {
-    const t = ground[ty * MAP_W + tx];
-    let img;
-    if (t === T.GRASS) img = assets.grass[(hash2(tx, ty, 7) * 3) | 0];
-    else if (t === T.PATH) img = assets.path[(hash2(tx, ty, 11) * 2) | 0];
-    else if (t === T.SAND) img = assets.sand;
-    else img = assets.water[waterVariant[ty * MAP_W + tx]][0];
-    g.drawImage(img, tx * TILE, ty * TILE);
-  }
-  return wc;
-}
-
-/* ---------- 15. INTERIOR ---------- */
-const IN_W = 10, IN_H = 7;
-const interior = { active: false, ground: new Uint8Array(IN_W * IN_H), solid: new Uint8Array(IN_W * IN_H), floorVariants: new Uint8Array(IN_W * IN_H), objects: [], canvas: null, doorTX: 4, entryTX: 4, entryTY: 5 };
-function generateInterior() {
-  for (let ty = 0; ty < IN_H; ty++) for (let tx = 0; tx < IN_W; tx++) {
-    const i = ty * IN_W + tx;
-    const isEdge = (tx === 0 || ty === 0 || tx === IN_W - 1 || ty === IN_H - 1);
-    const isDoor = (ty === IN_H - 1 && (tx === 4 || tx === 5));
-    if (isDoor) { interior.ground[i] = T.DOOR; interior.solid[i] = 0; }
-    else if (isEdge) { interior.ground[i] = T.WALL; interior.solid[i] = 1; }
-    else { interior.ground[i] = T.FLOOR; interior.solid[i] = 0; }
-    interior.floorVariants[i] = (tx + ty) & 1;
-  }
-  interior.objects = [{ tx: 2, ty: 2, kind: 'bed' },{ tx: 6, ty: 2, kind: 'table' },{ tx: 6, ty: 3, kind: 'chair' },{ tx: 8, ty: 5, kind: 'plant' }];
-  const c = makeCanvas(IN_W * TILE, IN_H * TILE);
-  const g = c.getContext('2d');
-  g.imageSmoothingEnabled = false;
-  for (let ty = 0; ty < IN_H; ty++) for (let tx = 0; tx < IN_W; tx++) {
-    const t = interior.ground[ty * IN_W + tx];
-    if (t === T.FLOOR) g.drawImage(assets.floor[interior.floorVariants[ty * IN_W + tx]], tx * TILE, ty * TILE);
-    else if (t === T.WALL) g.drawImage(assets.wall, tx * TILE, ty * TILE);
-    else if (t === T.DOOR) {
-      g.fillStyle = C.wood2; g.fillRect(tx * TILE, ty * TILE, TILE, TILE);
-      g.fillStyle = C.wood1; g.fillRect(tx * TILE + 1, ty * TILE + 1, TILE - 2, TILE - 1);
-      g.fillStyle = C.uiGold; g.fillRect(tx * TILE + 7, ty * TILE + 8, 2, 2);
-    }
-  }
-  for (const f of interior.objects) {
-    const fx = f.tx * TILE, fy = f.ty * TILE;
-    if (f.kind === 'bed') {
-      g.fillStyle = C.outline; g.fillRect(fx, fy + 4, 32, 14);
-      g.fillStyle = '#e07090'; g.fillRect(fx + 1, fy + 5, 30, 12);
-      g.fillStyle = '#f7efdf'; g.fillRect(fx + 2, fy + 6, 10, 10);
-      g.fillStyle = '#c05070'; g.fillRect(fx + 13, fy + 5, 18, 3);
-    } else if (f.kind === 'table') {
-      g.fillStyle = C.outline; g.fillRect(fx, fy + 6, 16, 8);
-      g.fillStyle = C.wood1; g.fillRect(fx + 1, fy + 7, 14, 6);
-      g.fillStyle = C.wood3; g.fillRect(fx + 3, fy + 2, 4, 5);
-      g.fillStyle = '#f0c060'; g.fillRect(fx + 4, fy + 3, 2, 3);
-    } else if (f.kind === 'chair') {
-      g.fillStyle = C.outline; g.fillRect(fx + 2, fy + 4, 12, 8);
-      g.fillStyle = C.wood2; g.fillRect(fx + 3, fy + 5, 10, 6);
-      g.fillStyle = C.wood3; g.fillRect(fx + 3, fy + 5, 10, 1);
-    } else if (f.kind === 'plant') {
-      g.fillStyle = C.outline; g.fillRect(fx + 5, fy + 8, 6, 6);
-      g.fillStyle = C.wood3; g.fillRect(fx + 6, fy + 9, 4, 5);
-      fillCirclePixel(g, fx + 8, fy + 6, 4, C.outline);
-      fillCirclePixel(g, fx + 8, fy + 6, 3, C.leaf1);
-      fillCirclePixel(g, fx + 7, fy + 5, 2, C.leaf2);
-    }
-    if (f.kind === 'bed' || f.kind === 'table') {
-      for (let dy = 0; dy < 2; dy++) for (let dx = 0; dx < 2; dx++) {
-        const sx = f.tx + dx, sy = f.ty + dy;
-        if (sx < IN_W && sy < IN_H) interior.solid[sy * IN_W + sx] = 1;
+  // NPCs
+  for(let ni=0;ni<NPC_DEFS.length;ni++){
+    const def=NPC_DEFS[ni];
+    const pal={...def.pal};
+    for(let d=0;d<4;d++){
+      for(let f=0;f<4;f++){
+        const y=(4+ni*4+d)*16;
+        drawSprite(def.body,pal,f*16,y);
       }
     }
   }
-  interior.canvas = c;
+}
+function makeTexture(canvas){
+  const tex=gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D,tex);
+  gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,canvas);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
+  return tex;
+}
+let spriteTex=null;
+
+/* ---------- 12. MESH BUILDER ---------- */
+function addQuad(arr,arrC,arrN,x1,y1,z1,x2,y2,z2,x3,y3,z3,x4,y4,z4,nx,ny,nz,col){
+  arr.push(x1,y1,z1,x2,y2,z2,x3,y3,z3, x1,y1,z1,x3,y3,z3,x4,y4,z4);
+  arrN.push(nx,ny,nz,nx,ny,nz,nx,ny,nz, nx,ny,nz,nx,ny,nz,nx,ny,nz);
+  for(let i=0;i<6;i++)arrC.push(col[0],col[1],col[2]);
+}
+function addBox(arr,arrC,arrN,cx,cy,cz,sx,sy,sz,col){
+  const hx=sx/2,hy=sy/2,hz=sz/2;
+  const x0=cx-hx,x1=cx+hx,y0=cy-hy,y1=cy+hy,z0=cz-hz,z1=cz+hz;
+  // top
+  addQuad(arr,arrC,arrN,x0,y1,z0,x1,y1,z0,x1,y1,z1,x0,y1,z1,0,1,0,col);
+  // bottom (skip for perf if below ground)
+  // sides
+  addQuad(arr,arrC,arrN,x0,y0,z1,x1,y0,z1,x1,y1,z1,x0,y1,z1,0,0,1,col); // +z
+  addQuad(arr,arrC,arrN,x1,y0,z0,x0,y0,z0,x0,y1,z0,x1,y1,z0,0,0,-1,col); // -z
+  addQuad(arr,arrC,arrN,x1,y0,z1,x1,y0,z0,x1,y1,z0,x1,y1,z1,1,0,0,col); // +x
+  addQuad(arr,arrC,arrN,x0,y0,z0,x0,y0,z1,x0,y1,z1,x0,y1,z0,-1,0,0,col); // -x
 }
 
-/* ---------- 16. COLLISION & PEMAIN ---------- */
-function entityCollides(px, py, hw, hh, inInterior) {
-  const bx = px - hw, by = py - hh, bw = hw * 2, bh = hh;
-  if (inInterior) {
-    const tx0 = Math.floor(bx / TILE), tx1 = Math.floor((bx + bw - 1) / TILE);
-    const ty0 = Math.floor(by / TILE), ty1 = Math.floor((by + bh - 1) / TILE);
-    for (let ty = ty0; ty <= ty1; ty++) for (let tx = tx0; tx <= tx1; tx++) {
-      if (tx < 0 || ty < 0 || tx >= IN_W || ty >= IN_H) return true;
-      if (interior.solid[ty * IN_W + tx]) return true;
+/* ---------- 13. DUNIA: TILE MAP ---------- */
+const ground=new Uint8Array(MAP_W*MAP_H);
+const solid=new Uint8Array(MAP_W*MAP_H);
+const occupied=new Uint8Array(MAP_W*MAP_H);
+const waterV=new Uint8Array(MAP_W*MAP_H);
+const T={GRASS:0,PATH:1,SAND:2,WATER:3};
+
+function getTile(tx,ty){
+  if(tx<0||ty<0||tx>=MAP_W||ty>=MAP_H)return -1;
+  return ground[ty*MAP_W+tx];
+}
+function setTile(tx,ty,t){
+  if(tx<0||ty<0||tx>=MAP_W||ty>=MAP_H)return;
+  ground[ty*MAP_W+tx]=t;
+}
+function isSolid(tx,ty){
+  if(tx<0||ty<0||tx>=MAP_W||ty>=MAP_H)return true;
+  return !!solid[ty*MAP_W+tx];
+}
+
+let objects=[]; // {x,y,z,kind,tx,ty,hp,...}
+let flowers=[]; // {x,y,color,phase}
+let bugs=[];
+let digSpots=[];
+
+function genWorld(){
+  const rng=mulberry32(20240607);
+  for(let i=0;i<MAP_W*MAP_H;i++){ground[i]=T.GRASS;solid[i]=0;occupied[i]=0;waterV[i]=0}
+  // paths
+  for(let tx=3;tx<=60;tx++){setTile(tx,24,T.PATH);setTile(tx,25,T.PATH)}
+  for(let ty=3;ty<=45;ty++){setTile(30,ty,T.PATH);setTile(31,ty,T.PATH)}
+  for(let ty=21;ty<=27;ty++)for(let tx=27;tx<=34;tx++)setTile(tx,ty,T.PATH);
+  // water
+  for(let ty=0;ty<MAP_H;ty++)for(let tx=0;tx<MAP_W;tx++){
+    const dx=(tx-47)/10.5,dy=(ty-11)/6.5;
+    const d=dx*dx+dy*dy;
+    if(d<=1){setTile(tx,ty,T.WATER);waterV[ty*MAP_W+tx]=(hash2(tx,ty,13)*3)|0}
+    else if(d<=1.45&&getTile(tx,ty)===T.GRASS)setTile(tx,ty,T.SAND);
+  }
+  // boundary + water solid
+  for(let ty=0;ty<MAP_H;ty++)for(let tx=0;tx<MAP_W;tx++){
+    const i=ty*MAP_W+tx;
+    if(ground[i]===T.WATER)solid[i]=1;
+    if(tx===0||ty===0||tx===MAP_W-1||ty===MAP_H-1)solid[i]=1;
+  }
+  // house
+  const hx=28,hy=20;
+  objects.push({kind:'house',tx:hx,ty:hy,x:hx*TILE,y:0,z:hy*TILE,doorX:hx+0.5,doorY:hy+1});
+  for(let ty=hy-2;ty<=hy;ty++)for(let tx=hx-2;tx<=hx+1;tx++){
+    if(tx<0||ty<0||tx>=MAP_W||ty>=MAP_H)continue;
+    solid[ty*MAP_W+tx]=1;occupied[ty*MAP_W+tx]=1;
+  }
+  // shop sign
+  objects.push({kind:'sign',tx:34,ty:22,x:34.5,y:0,z:22.5});
+  // trees border
+  for(let tx=0;tx<MAP_W;tx++)for(const ty of[0,1,MAP_H-2,MAP_H-1]){
+    if(rng()<0.7&&!isSolid(tx,ty)){addTree(tx,ty,(rng()*3)|0)}
+  }
+  for(let ty=0;ty<MAP_H;ty++)for(const tx of[0,1,MAP_W-2,MAP_W-1]){
+    if(rng()<0.7&&!isSolid(tx,ty)&&!occupied[ty*MAP_W+tx]){addTree(tx,ty,(rng()*3)|0)}
+  }
+  // random trees
+  for(let n=0;n<80;n++){
+    const tx=2+((rng()*(MAP_W-4))|0);
+    const ty=2+((rng()*(MAP_H-4))|0);
+    if(getTile(tx,ty)===T.GRASS&&!isSolid(tx,ty)&&!occupied[ty*MAP_W+tx]&&rng()<0.55){
+      addTree(tx,ty,(rng()*3)|0);
     }
-    return false;
   }
-  const tx0 = Math.floor(bx / TILE), tx1 = Math.floor((bx + bw - 1) / TILE);
-  const ty0 = Math.floor(by / TILE), ty1 = Math.floor((by + bh - 1) / TILE);
-  for (let ty = ty0; ty <= ty1; ty++) for (let tx = tx0; tx <= tx1; tx++) {
-    if (tx < 0 || ty < 0 || tx >= MAP_W || ty >= MAP_H) return true;
-    if (solid[ty * MAP_W + tx]) return true;
+  // rocks & bushes
+  for(let n=0;n<50;n++){
+    const tx=2+((rng()*(MAP_W-4))|0);
+    const ty=2+((rng()*(MAP_H-4))|0);
+    if(getTile(tx,ty)===T.GRASS&&!isSolid(tx,ty)&&!occupied[ty*MAP_W+tx]){
+      if(rng()<0.6){addRock(tx,ty)}else{addBush(tx,ty)}
+    }
   }
-  for (let i = 0; i < objects.length; i++) {
-    const c = objects[i].coll;
-    if (!c) continue;
-    if (bx < c.x + c.w && bx + bw > c.x && by < c.y + c.h && by + bh > c.y) return true;
+  // flowers
+  for(let ty=2;ty<MAP_H-2;ty++)for(let tx=2;tx<MAP_W-2;tx++){
+    if(getTile(tx,ty)!==T.GRASS)continue;
+    if(rng()<0.05){
+      const c=[0.95,0.6,0.75];
+      const alt=[[0.95,0.6,0.75],[0.97,0.85,0.45],[0.78,0.66,0.94],[0.97,0.63,0.54],[1,1,1]];
+      flowers.push({tx,ty,x:tx+0.5,z:ty+0.5,color:alt[(rng()*5)|0],phase:rng()*6});
+      occupied[ty*MAP_W+tx]=1;
+    }
+  }
+  // clear spawn
+  for(let ty=21;ty<=25;ty++)for(let tx=26;tx<=31;tx++){
+    if(tx<0||ty<0||tx>=MAP_W||ty>=MAP_H)continue;
+    solid[ty*MAP_W+tx]=0;
+  }
+  objects=objects.filter(o=>{
+    if(o.kind==='house'||o.kind==='sign')return true;
+    if(o.tx>=26&&o.tx<=31&&o.ty>=21&&o.ty<=25)return false;
+    return true;
+  });
+}
+function addTree(tx,ty,v){
+  if(isSolid(tx,ty)||occupied[ty*MAP_W+tx])return;
+  solid[ty*MAP_W+tx]=1;occupied[ty*MAP_W+tx]=1;
+  objects.push({kind:'tree',tx,ty,x:tx+0.5,y:0,z:ty+0.5,hp:3,v});
+}
+function addRock(tx,ty){
+  if(isSolid(tx,ty)||occupied[ty*MAP_W+tx])return;
+  solid[ty*MAP_W+tx]=1;occupied[ty*MAP_W+tx]=1;
+  objects.push({kind:'rock',tx,ty,x:tx+0.5,y:0,z:ty+0.5});
+}
+function addBush(tx,ty){
+  if(isSolid(tx,ty)||occupied[ty*MAP_W+tx])return;
+  solid[ty*MAP_W+tx]=1;occupied[ty*MAP_W+tx]=1;
+  objects.push({kind:'bush',tx,ty,x:tx+0.5,y:0,z:ty+0.5});
+}
+
+/* ---------- 14. CHUNK MESH BUILDING ---------- */
+const CHUNK=16;
+const chunks=[];
+const NUM_CHUNKS_X=Math.ceil(MAP_W/CHUNK);
+const NUM_CHUNKS_Y=Math.ceil(MAP_H/CHUNK);
+function tileHeight(t){
+  if(t===T.WATER)return 0.05;
+  if(t===T.SAND)return 0.12;
+  if(t===T.PATH)return 0.18;
+  return 0.15;
+}
+function tileColor(tx,ty,t){
+  const n=hash2(tx,ty,7);
+  if(t===T.WATER){
+    return waterV[ty*MAP_W+tx]%2?COL.waterA:COL.waterB;
+  }
+  if(t===T.PATH){
+    return n>0.5?COL.pathA:COL.pathB;
+  }
+  if(t===T.SAND){
+    return n>0.5?COL.sandA:COL.sandB;
+  }
+  if(n>0.85)return COL.grassC;
+  if(n<0.15)return COL.grassB;
+  return COL.grassA;
+}
+function buildChunk(cx,cy){
+  const verts=[],colors=[],norms=[];
+  const x0=cx*CHUNK,y0=cy*CHUNK;
+  const x1=Math.min(x0+CHUNK,MAP_W),y1=Math.min(y0+CHUNK,MAP_H);
+  // ground top faces
+  for(let ty=y0;ty<y1;ty++)for(let tx=x0;tx<x1;tx++){
+    const t=ground[ty*MAP_W+tx];
+    const h=tileHeight(t);
+    const col=tileColor(tx,ty,t);
+    const z=ty*TILE,zz=z+TILE;
+    const x=tx*TILE,xx=x+TILE;
+    addQuad(verts,colors,norms,x,h,z,xx,h,z,xx,h,zz,x,h,zz,0,1,0,col);
+  }
+  // ground side faces (boundary between tiles with different heights)
+  for(let ty=y0;ty<y1;ty++)for(let tx=x0;tx<x1;tx++){
+    const t=ground[ty*MAP_W+tx];
+    const h=tileHeight(t);
+    const col=[tileColor(tx,ty,t)[0]*0.8,tileColor(tx,ty,t)[1]*0.8,tileColor(tx,ty,t)[2]*0.8];
+    // check neighbors
+    const nx=getTile(tx+1,ty);
+    const nz=getTile(tx,ty+1);
+    const px=getTile(tx-1,ty);
+    const pz=getTile(tx,ty-1);
+    const nh=0.15;
+    if(nx>=0&&tileHeight(nx)<h-0.001){
+      const x=tx*TILE+TILE,z=ty*TILE,zz=z+TILE;
+      addQuad(verts,colors,norms,x,h,z,x,tileHeight(nx),z,x,tileHeight(nx),zz,x,h,zz,1,0,0,col);
+    }
+    if(nz>=0&&tileHeight(nz)<h-0.001){
+      const z=ty*TILE+TILE,x=tx*TILE,xx=x+TILE;
+      addQuad(verts,colors,norms,x,h,z,xx,h,z,xx,tileHeight(nz),z,x,tileHeight(nz),z,0,0,1,col);
+    }
+    if(px>=0&&tileHeight(px)<h-0.001){
+      const x=tx*TILE,z=ty*TILE,zz=z+TILE;
+      addQuad(verts,colors,norms,x,h,z,x,tileHeight(px),z,x,tileHeight(px),zz,x,h,zz,-1,0,0,col);
+    }
+    if(pz>=0&&tileHeight(pz)<h-0.001){
+      const z=ty*TILE,x=tx*TILE,xx=x+TILE;
+      addQuad(verts,colors,norms,x,h,z,xx,h,z,xx,tileHeight(pz),z,x,tileHeight(pz),z,0,0,-1,col);
+    }
+  }
+  // objects in chunk (they stick up from ground)
+  for(let i=0;i<objects.length;i++){
+    const o=objects[i];
+    if(o.tx<x0||o.tx>=x1||o.ty<y0||o.ty>=y1)continue;
+    const bx=o.tx*TILE+TILE/2,bz=o.ty*TILE+TILE/2;
+    const gy=tileHeight(ground[o.ty*MAP_W+o.tx]);
+    if(o.kind==='tree')buildTree(verts,colors,norms,bx,gy,bz,o.v||0);
+    else if(o.kind==='rock')buildRock(verts,colors,norms,bx,gy,bz);
+    else if(o.kind==='bush')buildBush(verts,colors,norms,bx,gy,bz);
+    else if(o.kind==='house')buildHouse(verts,colors,norms,o.tx*TILE,(o.ty-2)*TILE);
+    else if(o.kind==='sign')buildSign(verts,colors,norms,bx,gy,bz);
+  }
+  // flowers as tiny meshes
+  for(let i=0;i<flowers.length;i++){
+    const f=flowers[i];
+    if(f.tx<x0||f.tx>=x1||f.ty<y0||f.ty>=y1)continue;
+    const gy=tileHeight(ground[f.ty*MAP_W+f.tx]);
+    addBox(verts,colors,norms,f.x,gy+0.15,f.z,0.15,0.15,0.15,f.color);
+  }
+  return {verts,colors,norms,x0,y0,x1,y1};
+}
+function buildTree(v,cols,norms,x,gy,z){
+  // trunk
+  addBox(v,cols,norms,x,gy+0.9,z,0.35,1.8,0.35,COL.trunk);
+  // foliage (cluster of boxes)
+  const baseY=gy+2.0;
+  addBox(v,cols,norms,x,baseY+0.3,z,1.4,0.9,1.4,COL.leafA);
+  addBox(v,cols,norms,x,baseY+1.1,z,1.2,0.8,1.2,COL.leafB);
+  addBox(v,cols,norms,x,baseY+1.9,z,0.9,0.8,0.9,COL.leafC);
+  addBox(v,cols,norms,x,baseY+2.5,z,0.5,0.5,0.5,COL.leafC);
+  // fruit dots
+  if(v===1){
+    addBox(v,cols,norms,x+0.4,baseY+0.9,z-0.2,0.2,0.2,0.2,[0.95,0.63,0.63]);
+    addBox(v,cols,norms,x-0.3,baseY+1.5,z+0.2,0.2,0.2,0.2,[0.95,0.63,0.63]);
+  }
+}
+function buildRock(v,cols,norms,x,gy,z){
+  addBox(v,cols,norms,x,gy+0.35,z,0.85,0.7,0.85,COL.rock);
+  addBox(v,cols,norms,x+0.15,gy+0.8,z+0.1,0.55,0.35,0.55,COL.rockD);
+}
+function buildBush(v,cols,norms,x,gy,z){
+  addBox(v,cols,norms,x,gy+0.35,z,0.75,0.7,0.75,COL.leafA);
+  addBox(v,cols,norms,x,gy+0.7,z,0.55,0.35,0.55,COL.leafB);
+}
+function buildHouse(v,cols,norms,x,z){
+  const w=4,h=3,d=4;
+  // walls
+  addBox(v,cols,norms,x+w/2,0.15+h/2,z+d/2,w,h,d,COL.wall);
+  // wall bottom (wood)
+  addBox(v,cols,norms,x+w/2,0.4,z+d/2,w*1.02,0.5,d*1.02,COL.wallD);
+  // door
+  addBox(v,cols,norms,x+w/2,0.5+0.9,z+d,0.9,1.8,0.1,COL.door);
+  // windows
+  addBox(v,cols,norms,x+0.9,2.0,z+d,0.8,0.8,0.1,COL.glass);
+  addBox(v,cols,norms,x+w-0.9,2.0,z+d,0.8,0.8,0.1,COL.glass);
+  // roof (pyramid-ish)
+  addBox(v,cols,norms,x+w/2,0.15+h+0.4,z+d/2,w+0.6,0.8,d+0.6,COL.roof);
+  addBox(v,cols,norms,x+w/2,0.15+h+1.0,z+d/2,w-0.2,0.6,d-0.2,COL.roofD);
+  addBox(v,cols,norms,x+w/2,0.15+h+1.4,z+d/2,w-1.4,0.4,d-1.4,COL.roof);
+}
+function buildSign(v,cols,norms,x,gy,z){
+  addBox(v,cols,norms,x,gy+1.2,z,0.15,2.4,0.15,COL.woodD);
+  addBox(v,cols,norms,x,gy+2.0,z,1.2,0.7,0.15,COL.wood);
+  addBox(v,cols,norms,x,gy+1.9,z-0.1,0.8,0.15,0.05,[1.0,0.81,0.42]);
+}
+function buildAllChunks(){
+  chunks.length=0;
+  for(let cy=0;cy<NUM_CHUNKS_Y;cy++)for(let cx=0;cx<NUM_CHUNKS_X;cx++){
+    const data=buildChunk(cx,cy);
+    if(data.verts.length===0){chunks.push(null);continue}
+    const posBuf=gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER,posBuf);
+    gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(data.verts),gl.STATIC_DRAW);
+    const colBuf=gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER,colBuf);
+    gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(data.colors),gl.STATIC_DRAW);
+    const nrmBuf=gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER,nrmBuf);
+    gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(data.norms),gl.STATIC_DRAW);
+    chunks.push({posBuf,colBuf,nrmBuf,count:data.verts.length/3,meta:data});
+  }
+}
+
+/* ---------- 15. BILLBOARD BUFFER ---------- */
+let bbPosBuf=null,bbUVBuf=null,bbCSBuf=null,bbTintBuf=null;
+let bbCount=0;
+const bbVerts=[],bbUVs=[],bbCSs=[],bbTints=[];
+function resetBillboards(){
+  bbVerts.length=0;bbUVs.length=0;bbCSs.length=0;bbTints.length=0;
+  bbCount=0;
+}
+function addBillboard(cx,cy,cz,size,u0,v0,u1,v1,tint){
+  // two triangles
+  const corners=[[-0.5,-0.5,u0,v0],[0.5,-0.5,u1,v0],[0.5,0.5,u1,v1],[-0.5,0.5,u0,v1]];
+  const idx=[0,1,2,0,2,3];
+  for(let i=0;i<6;i++){
+    const c=corners[idx[i]];
+    bbVerts.push(c[0],c[1]);
+    bbUVs.push(c[2],c[3]);
+    bbCSs.push(cx,cy,cz,size);
+    bbTints.push(tint[0],tint[1],tint[2],tint[3]);
+  }
+  bbCount++;
+}
+function uploadBillboards(){
+  if(!bbPosBuf){
+    bbPosBuf=gl.createBuffer();bbUVBuf=gl.createBuffer();
+    bbCSBuf=gl.createBuffer();bbTintBuf=gl.createBuffer();
+  }
+  gl.bindBuffer(gl.ARRAY_BUFFER,bbPosBuf);
+  gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(bbVerts),gl.DYNAMIC_DRAW);
+  gl.bindBuffer(gl.ARRAY_BUFFER,bbUVBuf);
+  gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(bbUVs),gl.DYNAMIC_DRAW);
+  gl.bindBuffer(gl.ARRAY_BUFFER,bbCSBuf);
+  gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(bbCSs),gl.DYNAMIC_DRAW);
+  gl.bindBuffer(gl.ARRAY_BUFFER,bbTintBuf);
+  gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(bbTints),gl.DYNAMIC_DRAW);
+}
+
+/* ---------- 16. COLLISION ---------- */
+const PLAYER_HW=0.35,PLAYER_HH=0.4;
+function collides(px,pz,hw,hh){
+  const bx=px-hw,bz=px-hh;
+  const bx2=px+hw,bz2=pz+hh;
+  const tx0=Math.floor(bx),tx1=Math.floor(bx2);
+  const ty0=Math.floor(bz),ty1=Math.floor(bz2);
+  for(let ty=ty0;ty<=ty1;ty++)for(let tx=tx0;tx<=tx1;tx++){
+    if(isSolid(tx,ty))return true;
   }
   return false;
 }
-function tryMoveEntity(ent, dx, dy, hw, hh, inInterior) {
-  if (dx !== 0) { const nx = ent.x + dx; if (!entityCollides(nx, ent.y, hw, hh, inInterior)) ent.x = nx; }
-  if (dy !== 0) { const ny = ent.y + dy; if (!entityCollides(ent.x, ny, hw, hh, inInterior)) ent.y = ny; }
-}
-const player = { x: 440, y: 372, dir: 'down', frame: 0, animT: 0, moving: false, hw: 5, hh: 6, scene: 'world', stepPhase: 0 };
-const footParticles = [];
-function updatePlayer(dt) {
-  if (fishing.state !== 'idle') { player.moving = false; player.frame = 0; return; }
-  const a = getAxis();
-  if (a.x === 0 && a.y === 0) { player.moving = false; player.animT = 0; player.frame = 0; return; }
-  player.moving = true;
-  let dx = a.x, dy = a.y;
-  if (dx !== 0 && dy !== 0) { dx *= 0.70710678; dy *= 0.70710678; }
-  const step = SPEED * dt;
-  tryMoveEntity(player, dx * step, dy * step, player.hw, player.hh, player.scene === 'interior');
-  if (a.x !== 0) player.dir = a.x > 0 ? 'right' : 'left';
-  else player.dir = a.y > 0 ? 'down' : 'up';
-  player.animT += dt;
-  player.frame = Math.floor(player.animT * 8) % 4;
-  // Footstep particles (dust)
-  player.stepPhase += dt;
-  if (player.stepPhase > 0.22) {
-    player.stepPhase = 0;
-    if (player.scene === 'world' && footParticles.length < 20) {
-      footParticles.push({ x: player.x, y: player.y, life: 0.4 });
-    }
-  }
-}
-function updateFootParticles(dt) {
-  for (let i = footParticles.length - 1; i >= 0; i--) {
-    footParticles[i].life -= dt;
-    if (footParticles[i].life <= 0) footParticles.splice(i, 1);
-  }
+function tryMove(ent,dx,dz,hw,hh){
+  if(dx!==0&&!collides(ent.x+dx,ent.z,hw,hh))ent.x+=dx;
+  if(dz!==0&&!collides(ent.x,ent.z+dz,hw,hh))ent.z+=dz;
 }
 
 /* ---------- 17. NPC ---------- */
-const npcs = [];
-function createNPC(def) {
+function makeNPC(def){
+  const baseRow=4+NPC_DEFS.indexOf(def)*4;
   return {
-    id: def.id, name: def.name, personality: def.personality,
-    x: def.spawnX, y: def.spawnY, homeX: def.spawnX, homeY: def.spawnY,
-    dir: 'down', frame: 0, animT: 0, moving: false,
-    state: 'idle', stateTimer: 1 + Math.random() * 2,
-    hw: 5, hh: 6, affinity: 0,
-    sprites: bakeSpriteSet(def.bodies, def.palette, def.legColors, false),
-    greetings: def.greetings,
-    renderObj: { x: 0, y: 0, img: null, sortY: 0, isNPC: true },
-    getGreeting() {
-      const tier = this.affinity >= 3 ? 'friendly' : (this.affinity >= 1 ? 'acquainted' : 'stranger');
-      const pool = this.greetings[tier];
-      return pool[Math.floor(Math.random() * pool.length)];
+    def,name:def.name,personality:def.personality,
+    x:def.spawnX,z:def.spawnY,
+    homeX:def.spawnX,homeZ:def.spawnY,
+    dir:'down',frame:0,animT:0,
+    state:'idle',timer:1+Math.random()*2,
+    affinity:0,baseRow,
+    getGreet(){
+      const t=this.affinity>=3?'f':(this.affinity>=1?'a':'s');
+      const pool=this.def.greet[t];
+      return pool[(Math.random()*pool.length)|0];
     }
   };
 }
-function faceToward(a, targetX, targetY) {
-  const dx = targetX - a.x, dy = targetY - a.y;
-  if (Math.abs(dx) > Math.abs(dy)) a.dir = dx > 0 ? 'right' : 'left';
-  else a.dir = dy > 0 ? 'down' : 'up';
-}
-function updateNPCs(dt) {
-  for (let i = 0; i < npcs.length; i++) {
-    const npc = npcs[i];
-    if (npc === dialog.npc && dialog.active) continue;
-    npc.stateTimer -= dt;
-    if (npc.state === 'idle') {
-      if (npc.stateTimer <= 0) {
-        const r = Math.random();
-        if (r < 0.55) { npc.state = 'walk'; npc.stateTimer = 1.5 + Math.random() * 2.5; const dirs = ['down', 'up', 'left', 'right']; npc.dir = dirs[Math.floor(Math.random() * 4)]; }
-        else { npc.stateTimer = 1.5 + Math.random() * 2.5; faceToward(npc, npc.homeX, npc.homeY); }
+function updateNPCs(dt){
+  for(const npc of npcs){
+    if(dialog.active&&dialog.npc===npc)continue;
+    npc.timer-=dt;
+    if(npc.state==='idle'){
+      if(npc.timer<=0){
+        const r=Math.random();
+        if(r<0.6){
+          npc.state='walk';npc.timer=1.5+Math.random()*2.5;
+          npc.dir=['down','up','left','right'][(Math.random()*4)|0];
+        }else{npc.timer=1.5+Math.random()*2.5}
       }
-      npc.frame = 0;
-    } else if (npc.state === 'walk') {
-      const ddx = npc.x - npc.homeX, ddy = npc.y - npc.homeY;
-      const distHome = Math.sqrt(ddx * ddx + ddy * ddy);
-      let dx = 0, dy = 0;
-      if (distHome > 70) { dx = Math.sign(-ddx); dy = Math.sign(-ddy); if (dx !== 0 && dy !== 0) { dx *= 0.70710678; dy *= 0.70710678; } faceToward(npc, npc.homeX, npc.homeY); }
-      else { if (npc.dir === 'down') dy = 1; else if (npc.dir === 'up') dy = -1; else if (npc.dir === 'left') dx = -1; else if (npc.dir === 'right') dx = 1; }
-      const step = NPC_SPEED * dt;
-      const ox = npc.x, oy = npc.y;
-      tryMoveEntity(npc, dx * step, dy * step, npc.hw, npc.hh, false);
-      if (Math.abs(npc.x - ox) < 0.01 && Math.abs(npc.y - oy) < 0.01) npc.stateTimer = 0;
-      npc.animT += dt;
-      npc.frame = Math.floor(npc.animT * 6) % 4;
-      if (npc.stateTimer <= 0) { npc.state = 'idle'; npc.stateTimer = 1 + Math.random() * 3; npc.frame = 0; }
+      npc.frame=0;
+    }else{
+      const dx=npc.x-npc.homeX,dz=npc.z-npc.homeZ;
+      const dh=Math.sqrt(dx*dx+dz*dz);
+      let mx=0,mz=0;
+      if(dh>4){mx=-Math.sign(dx);mz=-Math.sign(dz)}
+      else{
+        if(npc.dir==='down')mz=1;
+        else if(npc.dir==='up')mz=-1;
+        else if(npc.dir==='left')mx=-1;
+        else mx=1;
+      }
+      const l=Math.sqrt(mx*mx+mz*mz)||1;
+      const sp=NPC_SPEED*dt;
+      const ox=npc.x,oz=npc.z;
+      tryMove(npc,mx/l*sp,mz/l*sp,0.35,0.4);
+      if(Math.abs(npc.x-ox)<0.001&&Math.abs(npc.z-oz)<0.001)npc.timer=0;
+      npc.animT+=dt;
+      npc.frame=Math.floor(npc.animT*6)%4;
+      if(npc.timer<=0){npc.state='idle';npc.timer=1+Math.random()*3;npc.frame=0}
     }
   }
 }
 
 /* ---------- 18. DIALOG ---------- */
-const dialog = { active: false, npc: null, lines: [], currentLine: 0, fullText: '', text: '', charTimer: 0, typewriterDone: false };
-function startDialog(npc) {
-  dialog.active = true; dialog.npc = npc;
-  dialog.lines = [npc.getGreeting()]; dialog.currentLine = 0;
-  dialog.fullText = dialog.lines[0]; dialog.text = ''; dialog.charTimer = 0; dialog.typewriterDone = false;
-  faceToward(npc, player.x, player.y); faceToward(player, npc.x, npc.y);
-  AudioSys.playSfx('dialog');
+const dialog={active:false,npc:null,lines:[],idx:0,full:'',text:'',t:0,done:false};
+function startDialog(npc){
+  dialog.active=true;dialog.npc=npc;
+  dialog.lines=[npc.getGreet()];dialog.idx=0;
+  dialog.full=dialog.lines[0];dialog.text='';dialog.t=0;dialog.done=false;
+  face(npc,player.x,player.z);
+  face(player,npc.x,npc.z);
+  Audio.sfx('dialog');
 }
-function advanceDialog() {
-  if (!dialog.active) return;
-  if (!dialog.typewriterDone) { dialog.text = dialog.fullText; dialog.typewriterDone = true; return; }
-  dialog.currentLine++;
-  if (dialog.currentLine >= dialog.lines.length) { closeDialog(); return; }
-  dialog.fullText = dialog.lines[dialog.currentLine];
-  dialog.text = ''; dialog.charTimer = 0; dialog.typewriterDone = false;
-  AudioSys.playSfx('dialog');
+function face(ent,tx,tz){
+  const dx=tx-ent.x,dz=tz-ent.z;
+  if(Math.abs(dx)>Math.abs(dz))ent.dir=dx>0?'right':'left';
+  else ent.dir=dz>0?'down':'up';
 }
-function closeDialog() { dialog.active = false; dialog.npc = null; dialog.lines = []; }
-function updateDialog(dt) {
-  if (!dialog.active || dialog.typewriterDone) return;
-  dialog.charTimer += dt;
-  const target = Math.floor(dialog.charTimer * 45);
-  if (target >= dialog.fullText.length) { dialog.text = dialog.fullText; dialog.typewriterDone = true; }
-  else dialog.text = dialog.fullText.substring(0, target);
+function advanceDialog(){
+  if(!dialog.active)return;
+  if(!dialog.done){dialog.text=dialog.full;dialog.done=true;return}
+  dialog.idx++;
+  if(dialog.idx>=dialog.lines.length){closeDialog();return}
+  dialog.full=dialog.lines[dialog.idx];dialog.text='';dialog.t=0;dialog.done=false;
+  Audio.sfx('dialog');
 }
-function isLastLine() { return dialog.currentLine >= dialog.lines.length - 1; }
-function npcReact(npc, itemId) {
-  const item = ITEMS[itemId];
-  if (!item) return 'HMM?';
-  const value = item.giftValue || 1;
-  const score = value + npc.affinity;
-  if (npc.personality === 'cheerful') {
-    if (score >= 5) return 'WAAAH! AKU SUKA SEKALI! MAKASIH YA~';
-    if (score >= 3) return 'OH, TERIMA KASIH! AKU SUKA INI.';
-    return 'HEHE, MAKASIH YA!';
-  } else if (npc.personality === 'gruff') {
-    if (score >= 5) return 'HMM... INI BAGUS. TERIMA KASIH, NAK.';
-    if (score >= 3) return 'OH... TERIMA KASIH.';
-    return 'TERIMA KASIH YA.';
-  } else if (npc.personality === 'sleepy') {
-    if (score >= 5) return 'NYAA~ AKU SUKA... MAKASIH...';
-    if (score >= 3) return 'NYA... MAKASIH...';
-    return 'NYA~ MAKASIH...';
-  }
-  if (score >= 5) return 'ADUH, KAMU MANIS! MAKASIH YA SAYANG~';
-  if (score >= 3) return 'IH, MAKASIH YA!';
-  return 'MAKASIH YA, SAYANG.';
+function closeDialog(){dialog.active=false;dialog.npc=null;dialog.lines=[]}
+function updateDialog(dt){
+  if(!dialog.active||dialog.done)return;
+  dialog.t+=dt;
+  const n=Math.floor(dialog.t*45);
+  if(n>=dialog.full.length){dialog.text=dialog.full;dialog.done=true}
+  else dialog.text=dialog.full.substring(0,n);
 }
-function giveGift(itemSlotIdx) {
-  const slot = inventory.slots[itemSlotIdx];
-  if (!slot) return false;
-  const item = ITEMS[slot.id];
-  if (item.isTool) { message.show('TIDAK BISA MEMBERI ALAT', 1.5); AudioSys.playSfx('error'); return false; }
-  const npc = dialog.npc;
-  if (!npc) return false;
-  const reaction = npcReact(npc, slot.id);
-  inventory.removeAt(itemSlotIdx, 1);
-  npc.affinity = Math.min(10, npc.affinity + 1);
-  dialog.lines = [reaction]; dialog.currentLine = 0;
-  dialog.fullText = reaction; dialog.text = ''; dialog.charTimer = 0; dialog.typewriterDone = false;
-  invUI.open = false; invUI.mode = 'normal';
-  AudioSys.playSfx('gift');
+function npcReact(npc,itemId){
+  const item=ITEMS[itemId];
+  if(!item)return'HMM?';
+  const s=(item.gift||1)+npc.affinity;
+  if(npc.personality==='cheerful')return s>=5?'WAAAH! MAKASIH YA~':(s>=3?'TERIMA KASIH! AKU SUKA.':'HEHE MAKASIH!');
+  if(npc.personality==='gruff')return s>=5?'HMM... BAGUS. MAKASIH.':(s>=3?'OH... MAKASIH.':'MAKASIH YA.');
+  if(npc.personality==='sleepy')return s>=5?'NYAA~ MAKASIH...':(s>=3?'NYA... MAKASIH...':'NYA~');
+  return s>=5?'ADUH MANIS! MAKASIH SAYANG~':(s>=3?'IH MAKASIH!':'MAKASIH SAYANG.');
+}
+function giveGift(idx){
+  const slot=inv.slots[idx];
+  if(!slot)return false;
+  if(ITEMS[slot.id].isTool){message.show('TIDAK BISA MEMBERI ALAT',1.5);Audio.sfx('error');return false}
+  const npc=dialog.npc;if(!npc)return false;
+  const r=npcReact(npc,slot.id);
+  inv.removeAt(idx,1);
+  npc.affinity=Math.min(10,npc.affinity+1);
+  dialog.lines=[r];dialog.idx=0;dialog.full=r;dialog.text='';dialog.t=0;dialog.done=false;
+  invUI.open=false;invUI.mode='normal';
+  Audio.sfx('gift');
   return true;
 }
 
 /* ---------- 19. MEMANCING ---------- */
-const FISH_TABLE = [
-  { id: 'ikan_kecil',  weight: 45, hourMin: 0, hourMax: 24 },
-  { id: 'ikan_sedang', weight: 30, hourMin: 6, hourMax: 22 },
-  { id: 'ikan_besar',  weight: 10, hourMin: 10, hourMax: 18 },
-  { id: 'udang',       weight: 15, hourMin: 18, hourMax: 6 }
+const FISH_TABLE=[
+  {id:'ikan_kecil',w:45,h0:0,h1:24},
+  {id:'ikan_sedang',w:30,h0:6,h1:22},
+  {id:'ikan_besar',w:10,h0:10,h1:18},
+  {id:'udang',w:15,h0:18,h1:6}
 ];
-function pickFish() {
-  const h = TimeSys.hour;
-  let total = 0;
-  const avail = [];
-  for (const f of FISH_TABLE) {
-    const ok = (f.hourMin < f.hourMax) ? (h >= f.hourMin && h < f.hourMax) : (h >= f.hourMin || h < f.hourMax);
-    if (ok) { avail.push(f); total += f.weight; }
+function pickFish(){
+  const h=TimeSys.hour;
+  let tot=0;const avail=[];
+  for(const f of FISH_TABLE){
+    const ok=f.h0<f.h1?(h>=f.h0&&h<f.h1):(h>=f.h0||h<f.h1);
+    if(ok){avail.push(f);tot+=f.w}
   }
-  if (avail.length === 0) return 'ikan_kecil';
-  let r = Math.random() * total;
-  for (const f of avail) { r -= f.weight; if (r <= 0) return f.id; }
-  return avail[avail.length - 1].id;
+  if(!avail.length)return'ikan_kecil';
+  let r=Math.random()*tot;
+  for(const f of avail){r-=f.w;if(r<=0)return f.id}
+  return avail[avail.length-1].id;
 }
-function findFishingSpot() {
-  let tx = Math.floor(player.x / TILE), ty = Math.floor(player.y / TILE);
-  let dtx = 0, dty = 0;
-  if (player.dir === 'down') dty = 1; else if (player.dir === 'up') dty = -1; else if (player.dir === 'left') dtx = -1; else dtx = 1;
-  for (let r = 1; r <= 2; r++) {
-    const wx = tx + dtx * r, wy = ty + dty * r;
-    if (getTile(wx, wy) === T.WATER) return { x: wx * TILE + 8, y: wy * TILE + 8 };
+function findFishSpot(){
+  let tx=Math.floor(player.x),tz=Math.floor(player.z);
+  let dx=0,dz=0;
+  if(player.dir==='down')dz=1;else if(player.dir==='up')dz=-1;
+  else if(player.dir==='left')dx=-1;else dx=1;
+  for(let r=1;r<=2;r++){
+    if(getTile(tx+dx*r,tz+dz*r)===T.WATER){
+      return{x:(tx+dx*r)*TILE+0.5,z:(tz+dz*r)*TILE+0.5}
+    }
   }
   return null;
 }
-const fishing = { state: 'idle', timer: 0, castX: 0, castY: 0, cursor: 0, cursorDir: 1, speed: 220, result: '', hasUmpan: false };
-function startFishing() {
-  const spot = findFishingSpot();
-  if (!spot) { message.show('HADAP AIR UNTUK MEMANCING', 1.5); AudioSys.playSfx('error'); return; }
-  fishing.state = 'casting'; fishing.timer = 0.4;
-  fishing.castX = spot.x; fishing.castY = spot.y; fishing.hasUmpan = false;
-  for (let i = 0; i < inventory.slots.length; i++) {
-    if (inventory.slots[i] && inventory.slots[i].id === 'umpan') { inventory.removeAt(i, 1); fishing.hasUmpan = true; break; }
+const fishing={state:'idle',timer:0,cx:0,cz:0,cursor:0,dir:1,speed:220,result:'',umpan:false};
+function startFishing(){
+  const spot=findFishSpot();
+  if(!spot){message.show('HADAP AIR UNTUK MEMANCING',1.5);Audio.sfx('error');return}
+  fishing.state='casting';fishing.timer=0.4;fishing.cx=spot.x;fishing.cz=spot.z;fishing.umpan=false;
+  for(let i=0;i<inv.slots.length;i++){
+    if(inv.slots[i]&&inv.slots[i].id==='umpan'){inv.removeAt(i,1);fishing.umpan=true;break}
   }
-  AudioSys.playSfx('cast');
+  Audio.sfx('cast');
 }
-function updateFishing(dt) {
-  if (fishing.state === 'idle') return;
-  fishing.timer -= dt;
-  if (fishing.state === 'casting') {
-    if (fishing.timer <= 0) { fishing.state = 'waiting'; fishing.timer = fishing.hasUmpan ? (0.6 + Math.random() * 1.2) : (1.5 + Math.random() * 2.5); }
-  } else if (fishing.state === 'waiting') {
-    if (fishing.timer <= 0) { fishing.state = 'bite'; fishing.timer = 1.2; AudioSys.playSfx('bite'); }
-  } else if (fishing.state === 'bite') {
-    if (fishing.timer <= 0) { fishing.state = 'idle'; message.show('IKAN KABUR...', 1.5); }
-  } else if (fishing.state === 'minigame') {
-    fishing.cursor += fishing.cursorDir * fishing.speed * dt;
-    if (fishing.cursor > 100) { fishing.cursor = 100; fishing.cursorDir = -1; }
-    if (fishing.cursor < 0) { fishing.cursor = 0; fishing.cursorDir = 1; }
-  } else if (fishing.state === 'result') {
-    if (fishing.timer <= 0) fishing.state = 'idle';
+function updateFishing(dt){
+  if(fishing.state==='idle')return;
+  fishing.timer-=dt;
+  if(fishing.state==='casting'){
+    if(fishing.timer<=0){fishing.state='waiting';fishing.timer=fishing.umpan?0.6+Math.random()*1.2:1.5+Math.random()*2.5}
+  }else if(fishing.state==='waiting'){
+    if(fishing.timer<=0){fishing.state='bite';fishing.timer=1.2;Audio.sfx('bite')}
+  }else if(fishing.state==='bite'){
+    if(fishing.timer<=0){fishing.state='idle';message.show('IKAN KABUR...',1.5)}
+  }else if(fishing.state==='minigame'){
+    fishing.cursor+=fishing.dir*fishing.speed*dt;
+    if(fishing.cursor>100){fishing.cursor=100;fishing.dir=-1}
+    if(fishing.cursor<0){fishing.cursor=0;fishing.dir=1}
+  }else if(fishing.state==='result'){
+    if(fishing.timer<=0)fishing.state='idle';
   }
 }
-function fishingPress() {
-  if (fishing.state === 'bite') {
-    fishing.state = 'minigame'; fishing.cursor = 0; fishing.cursorDir = 1; fishing.speed = 200 + Math.random() * 80;
-  } else if (fishing.state === 'minigame') {
-    const inZone = fishing.cursor >= 35 && fishing.cursor <= 65;
-    if (inZone) {
-      const fishId = pickFish();
-      inventory.add(fishId, 1);
-      fishing.result = 'DAPAT ' + ITEMS[fishId].name + '!';
-      CollectionSys.markCaught(fishId);
-      AudioSys.playSfx('catch');
-    } else { fishing.result = 'IKAN LEPAS...'; AudioSys.playSfx('miss'); }
-    fishing.state = 'result'; fishing.timer = 1.6;
+function fishingPress(){
+  if(fishing.state==='bite'){
+    fishing.state='minigame';fishing.cursor=0;fishing.dir=1;fishing.speed=200+Math.random()*80;
+  }else if(fishing.state==='minigame'){
+    const ok=fishing.cursor>=35&&fishing.cursor<=65;
+    if(ok){
+      const id=pickFish();
+      inv.add(id,1);
+      fishing.result='DAPAT '+ITEMS[id].name+'!';
+      Collection.mark(id);
+      Audio.sfx('catch');
+    }else{fishing.result='IKAN LEPAS...';Audio.sfx('miss')}
+    fishing.state='result';fishing.timer=1.6;
   }
 }
 
 /* ---------- 20. SERANGGA ---------- */
-const BUG_TABLE = [
-  { id: 'kupu',     weight: 50, hourMin: 6, hourMax: 18 },
-  { id: 'kumbang',  weight: 25, hourMin: 18, hourMax: 6 },
-  { id: 'belalang', weight: 25, hourMin: 6, hourMax: 18 }
+const BUG_TABLE=[
+  {id:'kupu',w:50,h0:6,h1:18},
+  {id:'kumbang',w:25,h0:18,h1:6},
+  {id:'belalang',w:25,h0:6,h1:18}
 ];
-const bugs = [];
-let bugSpawnTimer = 5;
-function pickBug() {
-  const h = TimeSys.hour;
-  let total = 0;
-  const avail = [];
-  for (const b of BUG_TABLE) {
-    const ok = (b.hourMin < b.hourMax) ? (h >= b.hourMin && h < b.hourMax) : (h >= b.hourMin || h < b.hourMax);
-    if (ok) { avail.push(b); total += b.weight; }
+let bugTimer=5;
+function pickBug(){
+  const h=TimeSys.hour;let tot=0;const avail=[];
+  for(const b of BUG_TABLE){
+    const ok=b.h0<b.h1?(h>=b.h0&&h<b.h1):(h>=b.h0||h<b.h1);
+    if(ok){avail.push(b);tot+=b.w}
   }
-  if (avail.length === 0) return 'kupu';
-  let r = Math.random() * total;
-  for (const b of avail) { r -= b.weight; if (r <= 0) return b.id; }
-  return avail[avail.length - 1].id;
+  if(!avail.length)return'kupu';
+  let r=Math.random()*tot;
+  for(const b of avail){r-=b.w;if(r<=0)return b.id}
+  return avail[avail.length-1].id;
 }
-function spawnBug() {
-  if (bugs.length >= 6) return;
-  for (let tries = 0; tries < 8; tries++) {
-    const ang = Math.random() * Math.PI * 2;
-    const dist = 60 + Math.random() * 80;
-    const bx = player.x + Math.cos(ang) * dist, by = player.y + Math.sin(ang) * dist;
-    const tx = Math.floor(bx / TILE), ty = Math.floor(by / TILE);
-    if (tx < 1 || ty < 1 || tx >= MAP_W - 1 || ty >= MAP_H - 1) continue;
-    if (getTile(tx, ty) !== T.GRASS) continue;
-    if (solid[ty * MAP_W + tx]) continue;
-    bugs.push({ id: pickBug(), x: tx * TILE + 8, y: ty * TILE + 8, phase: Math.random() * 6, timer: 12 + Math.random() * 10 });
+function spawnBug(){
+  if(bugs.length>=5)return;
+  for(let t=0;t<8;t++){
+    const ang=Math.random()*Math.PI*2;
+    const dist=2+Math.random()*3;
+    const bx=player.x+Math.cos(ang)*dist,bz=player.z+Math.sin(ang)*dist;
+    const tx=Math.floor(bx),ty=Math.floor(bz);
+    if(getTile(tx,ty)!==T.GRASS)continue;
+    if(isSolid(tx,ty))continue;
+    bugs.push({id:pickBug(),x:bx,z:bz,phase:Math.random()*6,timer:12+Math.random()*10});
     return;
   }
 }
-function updateBugs(dt) {
-  if (player.scene !== 'world') { bugs.length = 0; return; }
-  bugSpawnTimer -= dt;
-  if (bugSpawnTimer <= 0) { bugSpawnTimer = 6 + Math.random() * 6; if (Math.random() < 0.7) spawnBug(); }
-  for (let i = bugs.length - 1; i >= 0; i--) { bugs[i].timer -= dt; bugs[i].phase += dt * 3; if (bugs[i].timer <= 0) bugs.splice(i, 1); }
+function updateBugs(dt){
+  if(player.scene!=='world'){bugs.length=0;return}
+  bugTimer-=dt;
+  if(bugTimer<=0){bugTimer=6+Math.random()*6;if(Math.random()<0.7)spawnBug()}
+  for(let i=bugs.length-1;i>=0;i--){
+    bugs[i].timer-=dt;bugs[i].phase+=dt*3;
+    if(bugs[i].timer<=0)bugs.splice(i,1);
+  }
 }
-function tryCatchBug() {
-  let nearest = null, bestDist = 24;
-  for (let i = 0; i < bugs.length; i++) { const d = Math.hypot(bugs[i].x - player.x, bugs[i].y - player.y); if (d < bestDist) { bestDist = d; nearest = bugs[i]; } }
-  if (!nearest) { message.show('TIDAK ADA SERANGGA', 1.2); AudioSys.playSfx('error'); return; }
-  inventory.add(nearest.id, 1); CollectionSys.markCaught(nearest.id);
-  message.show('DAPAT ' + ITEMS[nearest.id].name.toUpperCase() + '!', 1.8);
-  AudioSys.playSfx('catch');
-  const idx = bugs.indexOf(nearest); if (idx >= 0) bugs.splice(idx, 1);
+function tryCatchBug(){
+  let n=null,bd=2.0;
+  for(const b of bugs){
+    const d=Math.hypot(b.x-player.x,b.z-player.z);
+    if(d<bd){bd=d;n=b}
+  }
+  if(!n){message.show('TIDAK ADA SERANGGA',1.2);Audio.sfx('error');return}
+  inv.add(n.id,1);Collection.mark(n.id);
+  message.show('DAPAT '+ITEMS[n.id].name.toUpperCase()+'!',1.8);
+  Audio.sfx('catch');
+  const i=bugs.indexOf(n);if(i>=0)bugs.splice(i,1);
 }
 
 /* ---------- 21. MENGGALI ---------- */
-const digSpots = [];
-let digSpawnTimer = 8;
-function spawnDigSpot() {
-  if (digSpots.length >= 4) return;
-  for (let tries = 0; tries < 8; tries++) {
-    const ang = Math.random() * Math.PI * 2;
-    const dist = 40 + Math.random() * 100;
-    const bx = player.x + Math.cos(ang) * dist, by = player.y + Math.sin(ang) * dist;
-    const tx = Math.floor(bx / TILE), ty = Math.floor(by / TILE);
-    if (tx < 1 || ty < 1 || tx >= MAP_W - 1 || ty >= MAP_H - 1) continue;
-    if (getTile(tx, ty) !== T.GRASS) continue;
-    if (solid[ty * MAP_W + tx] || occupied[ty * MAP_W + tx]) continue;
-    digSpots.push({ x: tx * TILE + 8, y: ty * TILE + 8, timer: 25 });
+let digTimer=8;
+function spawnDig(){
+  if(digSpots.length>=3)return;
+  for(let t=0;t<8;t++){
+    const ang=Math.random()*Math.PI*2;
+    const dist=3+Math.random()*4;
+    const bx=player.x+Math.cos(ang)*dist,bz=player.z+Math.sin(ang)*dist;
+    const tx=Math.floor(bx),ty=Math.floor(bz);
+    if(getTile(tx,ty)!==T.GRASS)continue;
+    if(isSolid(tx,ty))continue;
+    digSpots.push({tx,ty,x:tx+0.5,z:ty+0.5,timer:25});
     return;
   }
 }
-function updateDigSpots(dt) {
-  if (player.scene !== 'world') { digSpots.length = 0; return; }
-  digSpawnTimer -= dt;
-  if (digSpawnTimer <= 0) { digSpawnTimer = 10 + Math.random() * 8; spawnDigSpot(); }
-  for (let i = digSpots.length - 1; i >= 0; i--) { digSpots[i].timer -= dt; if (digSpots[i].timer <= 0) digSpots.splice(i, 1); }
+function updateDig(dt){
+  if(player.scene!=='world'){digSpots.length=0;return}
+  digTimer-=dt;
+  if(digTimer<=0){digTimer=10+Math.random()*8;spawnDig()}
+  for(let i=digSpots.length-1;i>=0;i--){
+    digSpots[i].timer-=dt;
+    if(digSpots[i].timer<=0)digSpots.splice(i,1);
+  }
 }
-function tryDig() {
-  let nearest = null, bestDist = 22;
-  for (let i = 0; i < digSpots.length; i++) { const d = Math.hypot(digSpots[i].x - player.x, digSpots[i].y - player.y); if (d < bestDist) { bestDist = d; nearest = digSpots[i]; } }
-  if (!nearest) { message.show('TIDAK ADA GALIAN', 1.2); AudioSys.playSfx('error'); return; }
-  const r = Math.random();
+function tryDig(){
+  let n=null,bd=1.5;
+  for(const d of digSpots){
+    const dist=Math.hypot(d.x-player.x,d.z-player.z);
+    if(dist<bd){bd=dist;n=d}
+  }
+  if(!n){message.show('TIDAK ADA GALIAN',1.2);Audio.sfx('error');return}
+  const r=Math.random();
   let id;
-  if (r < 0.4) id = 'fosil'; else if (r < 0.7) id = 'seed_bunga'; else if (r < 0.9) id = 'umpan'; else id = 'apel';
-  inventory.add(id, 1); CollectionSys.markCaught(id);
-  message.show('DAPAT ' + ITEMS[id].name.toUpperCase() + '!', 1.8);
-  AudioSys.playSfx('dig');
-  const idx = digSpots.indexOf(nearest); if (idx >= 0) digSpots.splice(idx, 1);
+  if(r<0.4)id='fosil';else if(r<0.7)id='seed';else if(r<0.9)id='umpan';else id='apel';
+  inv.add(id,1);Collection.mark(id);
+  message.show('DAPAT '+ITEMS[id].name.toUpperCase()+'!',1.8);
+  Audio.sfx('dig');
+  const i=digSpots.indexOf(n);if(i>=0)digSpots.splice(i,1);
 }
 
 /* ---------- 22. MENEBANG ---------- */
-function findNearestTree() {
-  let nearest = null, bestDist = 28;
-  for (let i = 0; i < objects.length; i++) {
-    const o = objects[i];
-    if (o.type !== 'tree') continue;
-    const dx = o.x + o.img.width / 2 - player.x, dy = o.y + o.img.height - player.y;
-    const d = Math.hypot(dx, dy);
-    if (d < bestDist) { bestDist = d; nearest = o; }
+function tryChop(){
+  let n=null,bd=2.2;
+  for(const o of objects){
+    if(o.kind!=='tree')continue;
+    const d=Math.hypot(o.x-player.x,o.z-player.z);
+    if(d<bd){bd=d;n=o}
   }
-  return nearest;
-}
-function tryChop() {
-  const tree = findNearestTree();
-  if (!tree) { message.show('TIDAK ADA POHON DEKAT', 1.2); AudioSys.playSfx('error'); return; }
-  if (tree.hp === undefined) tree.hp = 3;
-  tree.hp--;
-  AudioSys.playSfx('chop');
-  if (tree.hp <= 0) {
-    inventory.add('wood', 2 + Math.floor(Math.random() * 3));
-    if (Math.random() < 0.4) inventory.add('apel', 1);
-    message.show('POHON TUMBANG!', 1.6);
-    AudioSys.playSfx('treefall');
-    const idx = objects.indexOf(tree); if (idx >= 0) objects.splice(idx, 1);
-  } else {
-    message.show('TEBANG LAGI! (' + tree.hp + 'X)', 1.2);
-    inventory.add('wood', 1);
+  if(!n){message.show('TIDAK ADA POHON DEKAT',1.2);Audio.sfx('error');return}
+  if(n.hp===undefined)n.hp=3;
+  n.hp--;
+  Audio.sfx('chop');
+  if(n.hp<=0){
+    inv.add('wood',2+((Math.random()*3)|0));
+    if(Math.random()<0.4)inv.add('apel',1);
+    message.show('POHON TUMBANG!',1.6);
+    Audio.sfx('treefall');
+    const i=objects.indexOf(n);
+    if(i>=0)objects.splice(i,1);
+    // rebuild chunk
+    const cx=Math.floor(n.tx/CHUNK),cy=Math.floor(n.ty/CHUNK);
+    rebuildChunk(cx,cy);
+  }else{
+    message.show('TEBANG LAGI! ('+n.hp+'X)',1.2);
+    inv.add('wood',1);
   }
 }
 
 /* ---------- 23. TANAM ---------- */
-function tryPlant() {
-  let seedIdx = -1;
-  for (let i = 0; i < inventory.slots.length; i++) { if (inventory.slots[i] && inventory.slots[i].id === 'seed_bunga') { seedIdx = i; break; } }
-  if (seedIdx < 0) { message.show('TIDAK ADA BIBIT', 1.2); AudioSys.playSfx('error'); return; }
-  let tx = Math.floor(player.x / TILE), ty = Math.floor(player.y / TILE);
-  if (player.dir === 'down') ty += 1; else if (player.dir === 'up') ty -= 1; else if (player.dir === 'left') tx -= 1; else tx += 1;
-  if (getTile(tx, ty) !== T.GRASS || occupied[ty * MAP_W + tx]) { message.show('TIDAK BISA MENANAM DI SINI', 1.2); AudioSys.playSfx('error'); return; }
-  inventory.removeAt(seedIdx, 1);
-  addFlower(tx, ty, Math.floor(Math.random() * 5));
-  message.show('BUNGA DITANAM', 1.5);
-  AudioSys.playSfx('plant');
+function tryPlant(){
+  let si=-1;
+  for(let i=0;i<inv.slots.length;i++){if(inv.slots[i]&&inv.slots[i].id==='seed'){si=i;break}}
+  if(si<0){message.show('TIDAK ADA BIBIT',1.2);Audio.sfx('error');return}
+  let tx=Math.floor(player.x),ty=Math.floor(player.z);
+  if(player.dir==='down')ty++;else if(player.dir==='up')ty--;
+  else if(player.dir==='left')tx--;else tx++;
+  if(getTile(tx,ty)!==T.GRASS){message.show('TIDAK BISA MENANAM DI SINI',1.2);Audio.sfx('error');return}
+  inv.removeAt(si,1);
+  const alts=[[0.95,0.6,0.75],[0.97,0.85,0.45],[0.78,0.66,0.94],[0.97,0.63,0.54],[1,1,1]];
+  flowers.push({tx,ty,x:tx+0.5,z:ty+0.5,color:alts[(Math.random()*5)|0],phase:Math.random()*6});
+  message.show('BUNGA DITANAM',1.5);
+  Audio.sfx('plant');
+  const cx=Math.floor(tx/CHUNK),cy=Math.floor(ty/CHUNK);
+  rebuildChunk(cx,cy);
 }
 
 /* ---------- 24. TOKO ---------- */
-const shop = { open: false, tab: 0, cursor: 0, buyList: [{ id: 'seed_bunga', price: 10 },{ id: 'umpan', price: 5 },{ id: 'apel', price: 8 }] };
-function getSellPrice(id) { const it = ITEMS[id]; if (!it || it.isTool) return 0; return it.sell || 1; }
-function shopBuy() {
-  const list = shop.buyList;
-  if (shop.cursor >= list.length) return;
-  const item = list[shop.cursor];
-  if (!money.spend(item.price)) { message.show('KEPING TIDAK CUKUP', 1.5); AudioSys.playSfx('error'); return; }
-  inventory.add(item.id, 1);
-  message.show('BELI ' + ITEMS[item.id].name.toUpperCase(), 1.5);
-  AudioSys.playSfx('buy');
+const shop={open:false,tab:0,cursor:0,buy:[{id:'seed',price:10},{id:'umpan',price:5},{id:'apel',price:8}]};
+function sellPrice(id){const it=ITEMS[id];if(!it||it.isTool)return 0;return it.sell||1}
+function shopBuy(){
+  const it=shop.buy[shop.cursor];
+  if(!it)return;
+  if(!money.spend(it.price)){message.show('KEPING TIDAK CUKUP',1.5);Audio.sfx('error');return}
+  inv.add(it.id,1);
+  message.show('BELI '+ITEMS[it.id].name.toUpperCase(),1.5);
+  Audio.sfx('buy');
 }
-function shopSell() {
-  const slot = inventory.slots[shop.cursor];
-  if (!slot) return;
-  if (ITEMS[slot.id].isTool) { message.show('ALAT TIDAK BISA DIJUAL', 1.2); AudioSys.playSfx('error'); return; }
-  const price = getSellPrice(slot.id);
-  money.add(price); inventory.removeAt(shop.cursor, 1);
-  message.show('JUAL +' + price + ' KEPING', 1.5);
-  AudioSys.playSfx('sell');
+function shopSell(){
+  const slot=inv.slots[shop.cursor];
+  if(!slot)return;
+  if(ITEMS[slot.id].isTool){message.show('TIDAK BISA DIJUAL',1.2);Audio.sfx('error');return}
+  const p=sellPrice(slot.id);
+  money.add(p);inv.removeAt(shop.cursor,1);
+  message.show('JUAL +'+p+'K',1.5);
+  Audio.sfx('sell');
 }
 
 /* ---------- 25. KOLEKSI ---------- */
-const CollectionSys = {
-  caught: Object.create(null),
-  markCaught(id) { if (!this.caught[id]) this.caught[id] = 0; this.caught[id]++; },
-  has(id) { return !!this.caught[id]; },
-  open: false, list: []
-};
-function buildCollectionList() {
-  const list = [];
-  for (const id in ITEMS) if (ITEMS[id].category === 'fish' || ITEMS[id].category === 'bug') list.push(id);
-  CollectionSys.list = list;
+const Collection={caught:{},mark(id){if(!this.caught[id])this.caught[id]=0;this.caught[id]++},has(id){return!!this.caught[id]},open:false,list:[]};
+function buildCollectionList(){
+  Collection.list=[];
+  for(const id in ITEMS){
+    if(ITEMS[id].cat==='fish'||ITEMS[id].cat==='bug')Collection.list.push(id);
+  }
 }
 
-/* ---------- 26. AUDIO (Web Audio API) ---------- */
-const AudioSys = {
-  ctx: null, master: null, muted: false, ambient: null, ambientTimer: 0, ambientIndex: 0,
-  init() {
-    try {
-      const AC = window.AudioContext || window.webkitAudioContext;
-      if (!AC) return false;
-      this.ctx = new AC();
-      this.master = this.ctx.createGain();
-      this.master.gain.value = 0.4;
+/* ---------- 26. AUDIO ---------- */
+const Audio={
+  ctx:null,master:null,muted:false,ambTimer:0,ambIdx:0,
+  init(){
+    try{
+      const AC=window.AudioContext||window.webkitAudioContext;
+      if(!AC)return false;
+      this.ctx=new AC();
+      this.master=this.ctx.createGain();
+      this.master.gain.value=0.35;
       this.master.connect(this.ctx.destination);
       return true;
-    } catch (e) { return false; }
+    }catch(e){return false}
   },
-  userGesture() {
-    if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume().catch(() => {});
-  },
-  setMuted(m) {
-    this.muted = m;
-    if (this.master) this.master.gain.value = m ? 0 : 0.4;
-  },
-  toggleMute() {
-    this.setMuted(!this.muted);
-    message.show(this.muted ? 'SUARA MATI' : 'SUARA HIDUP', 1.2);
-  },
-  playSfx(name) {
-    if (!this.ctx || this.muted) return;
-    const c = this.ctx, t = c.currentTime;
-    const mk = (freq, type, dur, vol, slide) => {
-      const o = c.createOscillator(), g = c.createGain();
-      o.type = type || 'square';
-      o.frequency.setValueAtTime(freq, t);
-      if (slide) o.frequency.exponentialRampToValueAtTime(Math.max(20, freq * slide), t + dur);
-      g.gain.setValueAtTime(0, t);
-      g.gain.linearRampToValueAtTime(vol || 0.15, t + 0.01);
-      g.gain.exponentialRampToValueAtTime(0.001, t + dur);
-      o.connect(g); g.connect(this.master);
-      o.start(t); o.stop(t + dur + 0.02);
+  gesture(){if(this.ctx&&this.ctx.state==='suspended')this.ctx.resume().catch(()=>{})},
+  toggle(){this.muted=!this.muted;if(this.master)this.master.gain.value=this.muted?0:0.35;message.show(this.muted?'SUARA MATI':'SUARA HIDUP',1.2)},
+  sfx(name){
+    if(!this.ctx||this.muted)return;
+    const c=this.ctx,t=c.currentTime;
+    const mk=(freq,type,dur,vol,slide)=>{
+      const o=c.createOscillator(),g=c.createGain();
+      o.type=type||'square';
+      o.frequency.setValueAtTime(freq,t);
+      if(slide)o.frequency.exponentialRampToValueAtTime(Math.max(20,freq*slide),t+dur);
+      g.gain.setValueAtTime(0,t);
+      g.gain.linearRampToValueAtTime(vol||0.1,t+0.01);
+      g.gain.exponentialRampToValueAtTime(0.001,t+dur);
+      o.connect(g);g.connect(this.master);
+      o.start(t);o.stop(t+dur+0.02);
     };
-    switch (name) {
-      case 'dialog': mk(520, 'square', 0.06, 0.08); break;
-      case 'gift':   mk(660, 'square', 0.10, 0.12); setTimeout(() => mk(880, 'square', 0.15, 0.12), 90); break;
-      case 'catch':  mk(700, 'square', 0.08, 0.14); setTimeout(() => mk(1000, 'square', 0.10, 0.14), 60); setTimeout(() => mk(1320, 'square', 0.14, 0.14), 130); break;
-      case 'cast':   mk(400, 'triangle', 0.12, 0.10, 0.5); break;
-      case 'bite':   mk(900, 'square', 0.08, 0.14); setTimeout(() => mk(1200, 'square', 0.08, 0.14), 70); break;
-      case 'miss':   mk(300, 'sawtooth', 0.20, 0.10, 0.5); break;
-      case 'dig':    mk(220, 'square', 0.10, 0.10, 0.7); break;
-      case 'chop':   mk(160, 'square', 0.10, 0.12, 0.5); break;
-      case 'treefall': mk(120, 'sawtooth', 0.4, 0.15, 0.4); break;
-      case 'plant':  mk(500, 'triangle', 0.10, 0.10); setTimeout(() => mk(750, 'triangle', 0.10, 0.10), 80); break;
-      case 'buy':    mk(880, 'square', 0.08, 0.12); setTimeout(() => mk(1100, 'square', 0.10, 0.12), 60); break;
-      case 'sell':   mk(1100, 'square', 0.08, 0.12); setTimeout(() => mk(880, 'square', 0.10, 0.12), 60); break;
-      case 'error':  mk(200, 'sawtooth', 0.15, 0.10); break;
-      case 'menu':   mk(660, 'square', 0.05, 0.08); break;
-      case 'enter':  mk(500, 'triangle', 0.15, 0.12); setTimeout(() => mk(750, 'triangle', 0.2, 0.12), 120); break;
+    switch(name){
+      case'dialog':mk(520,'square',0.06,0.06);break;
+      case'gift':mk(660,'square',0.1,0.1);setTimeout(()=>mk(880,'square',0.15,0.1),90);break;
+      case'catch':mk(700,'square',0.08,0.12);setTimeout(()=>mk(1000,'square',0.1,0.12),60);setTimeout(()=>mk(1320,'square',0.14,0.12),130);break;
+      case'cast':mk(400,'triangle',0.12,0.08,0.5);break;
+      case'bite':mk(900,'square',0.08,0.1);setTimeout(()=>mk(1200,'square',0.08,0.1),70);break;
+      case'miss':mk(300,'sawtooth',0.2,0.08,0.5);break;
+      case'dig':mk(220,'square',0.1,0.08,0.7);break;
+      case'chop':mk(160,'square',0.1,0.1,0.5);break;
+      case'treefall':mk(120,'sawtooth',0.4,0.12,0.4);break;
+      case'plant':mk(500,'triangle',0.1,0.08);setTimeout(()=>mk(750,'triangle',0.1,0.08),80);break;
+      case'buy':mk(880,'square',0.08,0.1);setTimeout(()=>mk(1100,'square',0.1,0.1),60);break;
+      case'sell':mk(1100,'square',0.08,0.1);setTimeout(()=>mk(880,'square',0.1,0.1),60);break;
+      case'error':mk(200,'sawtooth',0.15,0.08);break;
+      case'menu':mk(660,'square',0.05,0.06);break;
+      case'enter':mk(500,'triangle',0.15,0.1);setTimeout(()=>mk(750,'triangle',0.2,0.1),120);break;
     }
   },
-  tickAmbient(dt) {
-    if (!this.ctx || this.muted) return;
-    this.ambientTimer -= dt;
-    if (this.ambientTimer <= 0) {
-      this.ambientTimer = 3.6 + Math.random() * 1.2;
-      // Simple pentatonic arpeggio
-      const scale = [261.63, 293.66, 329.63, 392.00, 440.00, 523.25];
-      const note = scale[this.ambientIndex % scale.length];
-      this.ambientIndex++;
-      const c = this.ctx, t = c.currentTime;
-      const o = c.createOscillator(), g = c.createGain();
-      o.type = 'triangle';
-      o.frequency.setValueAtTime(note, t);
-      g.gain.setValueAtTime(0, t);
-      g.gain.linearRampToValueAtTime(0.06, t + 0.4);
-      g.gain.exponentialRampToValueAtTime(0.001, t + 2.0);
-      o.connect(g); g.connect(this.master);
-      o.start(t); o.stop(t + 2.1);
+  tick(dt){
+    if(!this.ctx||this.muted)return;
+    this.ambTimer-=dt;
+    if(this.ambTimer<=0){
+      this.ambTimer=3.6+Math.random()*1.2;
+      const scale=[261.63,293.66,329.63,392.00,440.00,523.25];
+      const note=scale[this.ambIdx%scale.length];this.ambIdx++;
+      const c=this.ctx,t=c.currentTime;
+      const o=c.createOscillator(),g=c.createGain();
+      o.type='triangle';o.frequency.setValueAtTime(note,t);
+      g.gain.setValueAtTime(0,t);
+      g.gain.linearRampToValueAtTime(0.05,t+0.4);
+      g.gain.exponentialRampToValueAtTime(0.001,t+2.0);
+      o.connect(g);g.connect(this.master);
+      o.start(t);o.stop(t+2.1);
     }
   }
 };
 
 /* ---------- 27. TOUCH CONTROLS ---------- */
-const Touch = {
-  active: false, axisX: 0, axisY: 0,
-  joyActive: false, joyStartX: 0, joyStartY: 0, joyCurX: 0, joyCurY: 0,
-  buttons: [], uiCooldown: 0,
-  init() {
-    const isTouch = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
-    if (!isTouch) return;
-    this.active = true;
-    const c = display;
-    
-    // Ergonomic Layout for thumbs
-    const btnA = { x: W - 42, y: H - 42, w: 36, h: 36, id: 'A', text: 'A' }; // E / Enter
-    const btnB = { x: W - 82, y: H - 32, w: 28, h: 28, id: 'B', text: 'TAS' }; // I / Tab
-    const btnT = { x: W - 32, y: H - 82, w: 28, h: 28, id: 'T', text: 'ALAT' }; // Q
-    const btnC = { x: W - 60, y: 10, w: 20, h: 20, id: 'C', text: 'BUKU' }; // C
-    const btnEsc = { x: W - 30, y: 10, w: 20, h: 20, id: 'ESC', text: '||' }; // Esc
-    this.buttons = [btnA, btnB, btnT, btnC, btnEsc];
-
-    const findTouch = (touches, region) => {
-      for (let i = 0; i < touches.length; i++) {
-        const rect = c.getBoundingClientRect();
-        const tx = (touches[i].clientX - rect.left) / rect.width * W;
-        const ty = (touches[i].clientY - rect.top) / rect.height * H;
-        if (tx >= region.x && tx <= region.x + region.w && ty >= region.y && ty <= region.y + region.h) return { tx, ty };
+const Touch={
+  active:false,axisX:0,axisZ:0,joyId:null,joyStartX:0,joyStartY:0,joyCX:0,joyCY:0,
+  camId:null,camLastX:0,camLastY:0,
+  btnStates:{A:false,B:false,M:false,C:false},
+  buttons:[],
+  init(){
+    const isTouch=('ontouchstart'in window)||navigator.maxTouchPoints>0;
+    if(!isTouch)return;
+    this.active=true;
+    // UI-pixel positions (buttons)
+    this.buttons=[
+      {id:'A',x:UI_W-42,y:UI_H-42,r:16},
+      {id:'B',x:UI_W-72,y:UI_H-30,r:13},
+      {id:'C',x:UI_W-30,y:30,r:11},
+      {id:'M',x:UI_W-58,y:30,r:11}
+    ];
+    // screen coords helper
+    const toUI=(sx,sy)=>{
+      const cw=window.innerWidth,ch=window.innerHeight;
+      const scale=uiScale;
+      return {x:(sx-uiOffX)/scale,y:(sy-uiOffY)/scale};
+    };
+    const hit=(ux,uy)=>{
+      for(const b of this.buttons){
+        const d=Math.hypot(ux-b.x,uy-b.y);
+        if(d<b.r+4)return b;
       }
       return null;
     };
-    
-    const joyRegion = { x: 0, y: H - 90, w: 90, h: 90 };
-    
-    const handleStart = (e) => {
-      e.preventDefault();
-      AudioSys.userGesture();
-      const touches = e.touches;
-      
-      // Check UI full-screen taps for advancement
-      if (game.state === 'title' || !game.tutorialShown || dialog.active || fishing.state === 'minigame' || fishing.state === 'bite') {
-         // Cek jika menekan tombol spesifik B di Title (Load game)
-         if (game.state === 'title' && findTouch(touches, btnB)) { onKeyPressed('KeyL'); return; }
-         onKeyPressed('KeyE');
-         return;
-      }
-      
-      // joystick
-      const jt = findTouch(touches, joyRegion);
-      if (jt) { this.joyActive = true; this.joyStartX = jt.tx; this.joyStartY = jt.ty; this.joyCurX = jt.tx; this.joyCurY = jt.ty; }
-      
-      // buttons
-      for (const b of this.buttons) {
-        if (findTouch(touches, b)) this.handleButton(b.id);
-      }
-    };
-    const handleMove = (e) => {
-      e.preventDefault();
-      if (!this.joyActive) return;
-      const touches = e.touches;
-      // use any touch to update joystick
-      for (let i = 0; i < touches.length; i++) {
-        const rect = c.getBoundingClientRect();
-        const tx = (touches[i].clientX - rect.left) / rect.width * W;
-        const ty = (touches[i].clientY - rect.top) / rect.height * H;
-        const dx = tx - this.joyStartX, dy = ty - this.joyStartY;
-        const len = Math.hypot(dx, dy);
-        if (len < 60) {
-          this.joyCurX = tx; this.joyCurY = ty;
-          const nx = dx / 25, ny = dy / 25;
-          this.axisX = Math.max(-1, Math.min(1, nx));
-          this.axisY = Math.max(-1, Math.min(1, ny));
-          return;
+    const joyRegion={x:0,y:UI_H-65,w:65,h:65};
+    const inJoy=(ux,uy)=>ux>=joyRegion.x&&ux<=joyRegion.x+joyRegion.w&&uy>=joyRegion.y&&uy<=joyRegion.y+joyRegion.h;
+    window.addEventListener('touchstart',(e)=>{
+      Audio.gesture();
+      for(const t of e.changedTouches){
+        const p=toUI(t.clientX,t.clientY);
+        const btn=hit(p.x,p.y);
+        if(btn){
+          this.pressButton(btn.id);
+        }else if(inJoy(p.x,p.y)){
+          this.joyId=t.identifier;
+          this.joyStartX=p.x;this.joyStartY=p.y;
+          this.joyCX=joyRegion.x+joyRegion.w/2;
+          this.joyCY=joyRegion.y+joyRegion.h/2;
+          this.axisX=0;this.axisZ=0;
+        }else if(this.camId===null){
+          this.camId=t.identifier;
+          this.camLastX=t.clientX;this.camLastY=t.clientY;
         }
       }
-    };
-    const handleEnd = (e) => {
-      e.preventDefault();
-      if (e.touches.length === 0) { this.joyActive = false; this.axisX = 0; this.axisY = 0; }
-    };
-    c.addEventListener('touchstart', handleStart, { passive: false });
-    c.addEventListener('touchmove', handleMove, { passive: false });
-    c.addEventListener('touchend', handleEnd, { passive: false });
-    c.addEventListener('touchcancel', handleEnd, { passive: false });
-  },
-  handleButton(id) {
-    if (id === 'A') onKeyPressed('KeyE');
-    else if (id === 'B') {
-      if (shop.open) onKeyPressed('Tab');
-      else onKeyPressed('KeyI');
-    }
-    else if (id === 'T') onKeyPressed('KeyQ');
-    else if (id === 'C') onKeyPressed('KeyC');
-    else if (id === 'ESC') onKeyPressed('Escape');
-  },
-  updateUI(dt) {
-    if (this.uiCooldown > 0) this.uiCooldown -= dt;
-    if (this.joyActive && this.uiCooldown <= 0) {
-      if (invUI.open || shop.open || CollectionSys.open) {
-         if (this.axisX > 0.5) { onKeyPressed('ArrowRight'); this.uiCooldown = 0.25; }
-         else if (this.axisX < -0.5) { onKeyPressed('ArrowLeft'); this.uiCooldown = 0.25; }
-         else if (this.axisY > 0.5) { onKeyPressed('ArrowDown'); this.uiCooldown = 0.25; }
-         else if (this.axisY < -0.5) { onKeyPressed('ArrowUp'); this.uiCooldown = 0.25; }
+    },{passive:false});
+    window.addEventListener('touchmove',(e)=>{
+      for(const t of e.changedTouches){
+        if(t.identifier===this.joyId){
+          const p=toUI(t.clientX,t.clientY);
+          const dx=p.x-this.joyStartX,dy=p.y-this.joyStartY;
+          const r=28;
+          const nx=dx/r,ny=dy/r;
+          this.axisX=Math.max(-1,Math.min(1,nx));
+          this.axisZ=Math.max(-1,Math.min(1,ny));
+          this.joyCX=joyRegion.x+joyRegion.w/2+this.axisX*20;
+          this.joyCY=joyRegion.y+joyRegion.h/2+this.axisZ*20;
+        }else if(t.identifier===this.camId){
+          const dx=t.clientX-this.camLastX;
+          const dy=t.clientY-this.camLastY;
+          this.camLastX=t.clientX;this.camLastY=t.clientY;
+          camera.yaw-=dx*0.008;
+          camera.pitch=Math.max(0.3,Math.min(1.4,camera.pitch+dy*0.005));
+        }
       }
-    }
+    },{passive:false});
+    const endTouch=(e)=>{
+      for(const t of e.changedTouches){
+        if(t.identifier===this.joyId){
+          this.joyId=null;this.axisX=0;this.axisZ=0;
+        }else if(t.identifier===this.camId){
+          this.camId=null;
+        }
+      }
+      if(e.touches.length===0){
+        this.btnStates.A=this.btnStates.B=this.btnStates.C=this.btnStates.M=false;
+      }
+    };
+    window.addEventListener('touchend',endTouch,{passive:false});
+    window.addEventListener('touchcancel',endTouch,{passive:false});
   },
-  render() {
-    if (!this.active) return;
-    // Joystick
-    const jx = 45, jy = H - 45;
-    ctx.strokeStyle = 'rgba(243,227,200,0.4)';
-    ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.arc(jx, jy, 26, 0, Math.PI * 2); ctx.stroke();
-    ctx.fillStyle = 'rgba(26,20,18,0.6)';
-    ctx.beginPath(); ctx.arc(jx, jy, 26, 0, Math.PI * 2); ctx.fill();
-    const kx = jx + this.axisX * 16, ky = jy + this.axisY * 16;
-    ctx.fillStyle = 'rgba(255,207,107,0.85)';
-    ctx.beginPath(); ctx.arc(kx, ky, 10, 0, Math.PI * 2); ctx.fill();
-    // Buttons
-    for (const b of this.buttons) {
-      ctx.fillStyle = 'rgba(26,20,18,0.75)';
-      ctx.beginPath(); ctx.arc(b.x + b.w/2, b.y + b.h/2, b.w/2, 0, Math.PI * 2); ctx.fill();
-      ctx.strokeStyle = 'rgba(243,227,200,0.8)';
-      ctx.lineWidth = 1.5;
-      ctx.beginPath(); ctx.arc(b.x + b.w/2, b.y + b.h/2, b.w/2, 0, Math.PI * 2); ctx.stroke();
-      drawTextCentered(b.text, b.x + b.w/2, b.y + b.h/2 - 3, C.uiGold);
+  pressButton(id){
+    this.btnStates[id]=true;
+    setTimeout(()=>{this.btnStates[id]=false},150);
+    if(id==='A')onKey('KeyE');
+    else if(id==='B')onKey('KeyI');
+    else if(id==='C')onKey('KeyC');
+    else if(id==='M')Audio.toggle();
+  },
+  render(){
+    if(!this.active)return;
+    // joystick base
+    uctx.strokeStyle='rgba(243,227,200,0.5)';uctx.lineWidth=1;
+    uctx.beginPath();uctx.arc(32,UI_H-32,22,0,Math.PI*2);uctx.stroke();
+    uctx.fillStyle='rgba(26,20,18,0.55)';
+    uctx.beginPath();uctx.arc(32,UI_H-32,22,0,Math.PI*2);uctx.fill();
+    const kx=32+(this.joyId?this.axisX*14:0);
+    const ky=UI_H-32+(this.joyId?this.axisZ*14:0);
+    uctx.fillStyle='rgba(255,207,107,0.85)';
+    uctx.beginPath();uctx.arc(kx,ky,7,0,Math.PI*2);uctx.fill();
+    // buttons
+    for(const b of this.buttons){
+      const on=this.btnStates[b.id];
+      uctx.fillStyle=on?'rgba(255,207,107,0.7)':'rgba(26,20,18,0.6)';
+      uctx.beginPath();uctx.arc(b.x,b.y,b.r,0,Math.PI*2);uctx.fill();
+      uctx.strokeStyle='rgba(243,227,200,0.7)';uctx.lineWidth=1;
+      uctx.beginPath();uctx.arc(b.x,b.y,b.r,0,Math.PI*2);uctx.stroke();
+      drawTextC(b.id,b.x,b.y-3,on?COL.uiBg:COL.uiGold);
     }
   }
 };
 
-/* ---------- 28. SAVE / LOAD ---------- */
-const SaveSys = {
-  save() {
-    try {
-      const data = {
-        v: SAVE_VERSION,
-        player: { x: player.x, y: player.y, scene: player.scene, dir: player.dir },
-        money: money.amount,
-        inventory: inventory.slots.map(s => s ? { id: s.id, count: s.count } : null),
-        activeTool: inventory.activeTool,
-        npcAffinity: npcs.map(n => n.affinity),
-        collection: CollectionSys.caught,
-        weather: { type: Weather.type, timer: Weather.timer },
-        day: TimeSys.day,
-        tutorialShown: game.tutorialShown
+/* ---------- 28. INPUT KEYBOARD ---------- */
+const keys={};
+window.addEventListener('keydown',(e)=>{
+  if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code))e.preventDefault();
+  if(e.repeat)return;
+  keys[e.code]=true;
+  Audio.gesture();
+  onKey(e.code);
+});
+window.addEventListener('keyup',(e)=>{keys[e.code]=false});
+window.addEventListener('blur',()=>{for(const k in keys)keys[k]=false});
+
+/* ---------- 29. SAVE / LOAD ---------- */
+const Save={
+  save(){
+    try{
+      const data={
+        v:SAVE_VERSION,
+        player:{x:player.x,z:player.z,dir:player.dir,scene:player.scene},
+        money:money.amount,
+        inv:inv.slots.map(s=>s?{id:s.id,n:s.n}:null),
+        active:inv.active,
+        affin:npcs.map(n=>n.affinity),
+        caught:Collection.caught,
+        weather:{type:Weather.type,timer:Weather.timer},
+        tutorial:game.tutorial
       };
-      localStorage.setItem(SAVE_KEY, JSON.stringify(data));
+      localStorage.setItem(SAVE_KEY,JSON.stringify(data));
       return true;
-    } catch (e) { return false; }
+    }catch(e){return false}
   },
-  load() {
-    try {
-      const raw = localStorage.getItem(SAVE_KEY);
-      if (!raw) return false;
-      const data = JSON.parse(raw);
-      if (!data || data.v !== SAVE_VERSION) return false;
-      // Validasi
-      if (typeof data.player?.x !== 'number' || typeof data.player?.y !== 'number') return false;
-      if (!Array.isArray(data.inventory) || data.inventory.length !== 20) return false;
-      // Terapkan
-      player.x = data.player.x;
-      player.y = data.player.y;
-      player.scene = data.player.scene === 'interior' ? 'interior' : 'world';
-      player.dir = ['down','up','left','right'].includes(data.player.dir) ? data.player.dir : 'down';
-      money.amount = typeof data.money === 'number' ? data.money : 100;
-      for (let i = 0; i < 20; i++) {
-        const s = data.inventory[i];
-        if (s && typeof s.id === 'string' && ITEMS[s.id] && typeof s.count === 'number' && s.count > 0) {
-          inventory.slots[i] = { id: s.id, count: s.count };
-        } else inventory.slots[i] = null;
+  load(){
+    try{
+      const raw=localStorage.getItem(SAVE_KEY);
+      if(!raw)return false;
+      const d=JSON.parse(raw);
+      if(!d||d.v!==SAVE_VERSION)return false;
+      if(typeof d.player?.x!=='number')return false;
+      if(!Array.isArray(d.inv)||d.inv.length!==20)return false;
+      player.x=d.player.x;player.z=d.player.z;
+      player.scene=d.player.scene==='interior'?'interior':'world';
+      player.dir=['down','up','left','right'].includes(d.player.dir)?d.player.dir:'down';
+      money.amount=typeof d.money==='number'?d.money:100;
+      for(let i=0;i<20;i++){
+        const s=d.inv[i];
+        if(s&&typeof s.id==='string'&&ITEMS[s.id]&&typeof s.n==='number'&&s.n>0)
+          inv.slots[i]={id:s.id,n:s.n};
+        else inv.slots[i]=null;
       }
-      inventory.activeTool = typeof data.activeTool === 'number' ? Math.max(0, Math.min(4, data.activeTool)) : 0;
-      if (Array.isArray(data.npcAffinity)) {
-        for (let i = 0; i < npcs.length && i < data.npcAffinity.length; i++) {
-          npcs[i].affinity = typeof data.npcAffinity[i] === 'number' ? data.npcAffinity[i] : 0;
-        }
+      inv.active=typeof d.active==='number'?Math.max(0,Math.min(4,d.active)):0;
+      if(Array.isArray(d.affin)){
+        for(let i=0;i<npcs.length&&i<d.affin.length;i++)
+          npcs[i].affinity=typeof d.affin[i]==='number'?d.affin[i]:0;
       }
-      if (data.collection && typeof data.collection === 'object') {
-        CollectionSys.caught = data.collection;
+      if(d.caught&&typeof d.caught==='object')Collection.caught=d.caught;
+      if(d.weather&&typeof d.weather.type==='string'){
+        Weather.type=['sunny','rain','windy'].includes(d.weather.type)?d.weather.type:'sunny';
+        Weather.timer=typeof d.weather.timer==='number'?d.weather.timer:120;
       }
-      if (data.weather && typeof data.weather.type === 'string') {
-        Weather.type = ['sunny','rain','windy'].includes(data.weather.type) ? data.weather.type : 'sunny';
-        Weather.timer = typeof data.weather.timer === 'number' ? data.weather.timer : 90;
-        Weather.initParticles();
-      }
-      game.tutorialShown = !!data.tutorialShown;
+      game.tutorial=!!d.tutorial;
       return true;
-    } catch (e) { return false; }
+    }catch(e){return false}
   },
-  clear() {
-    try { localStorage.removeItem(SAVE_KEY); return true; } catch (e) { return false; }
-  },
-  exists() {
-    try { return !!localStorage.getItem(SAVE_KEY); } catch (e) { return false; }
-  }
+  exists(){try{return!!localStorage.getItem(SAVE_KEY)}catch(e){return false}}
 };
-let autoSaveTimer = 0;
-function autoSaveTick(dt) {
-  if (game.state !== 'play' || game.paused) return;
-  autoSaveTimer += dt;
-  if (autoSaveTimer >= 30) { autoSaveTimer = 0; SaveSys.save(); }
-}
-
-/* ---------- 29. INTERAKSI UTAMA ---------- */
-function findNearestNPC() {
-  let nearest = null, bestDist = INTERACT_RADIUS;
-  for (let i = 0; i < npcs.length; i++) {
-    const d = Math.hypot(npcs[i].x - player.x, npcs[i].y - player.y);
-    if (d < bestDist) { bestDist = d; nearest = npcs[i]; }
-  }
-  return nearest;
-}
-function nearShopSign() { if (!shopSign) return false; return Math.hypot(shopSign.cx - player.x, shopSign.cy - player.y) < 20; }
-function nearHouseDoor() {
-  for (let i = 0; i < objects.length; i++) {
-    const o = objects[i];
-    if (o.type !== 'house') continue;
-    if (Math.hypot(o.doorX - player.x, o.doorY - player.y) < 18) return o;
-  }
-  return null;
-}
-function interact() {
-  if (player.scene === 'interior') {
-    const pty = Math.floor(player.y / TILE);
-    if (pty >= IN_H - 1) { exitHouse(); return; }
-    message.show('TIDAK ADA APA-APA', 1.0);
-    return;
-  }
-  const npc = findNearestNPC();
-  if (npc) { startDialog(npc); return; }
-  if (nearShopSign()) { shop.open = true; shop.tab = 0; shop.cursor = 0; AudioSys.playSfx('menu'); return; }
-  const house = nearHouseDoor();
-  if (house) { enterHouse(); return; }
-  const slot = inventory.getActive();
-  if (!slot) { message.show('TANGAN KOSONG', 1.0); return; }
-  const toolId = slot.id;
-  if (toolId === 'rod') { startFishing(); return; }
-  if (toolId === 'net') { tryCatchBug(); return; }
-  if (toolId === 'shovel') { tryDig(); return; }
-  if (toolId === 'axe') { tryChop(); return; }
-  if (toolId === 'water') { message.show('PENYIRAM DIPAKAI', 1.0); return; }
-  if (toolId === 'seed_bunga') { tryPlant(); return; }
-  message.show(ITEMS[toolId].name.toUpperCase() + ' DIPAKAI', 1.0);
-}
-function enterHouse() {
-  player.scene = 'interior';
-  player.x = interior.entryTX * TILE + 8;
-  player.y = interior.entryTY * TILE + TILE - 2;
-  player.dir = 'up';
-  AudioSys.playSfx('enter');
-  SaveSys.save();
-}
-function exitHouse() {
-  player.scene = 'world';
-  const house = objects.find(o => o.type === 'house');
-  if (house) { player.x = house.doorX; player.y = house.doorY + 12; }
-  player.dir = 'down';
-  AudioSys.playSfx('enter');
+let autoSaveT=0;
+function autoSave(dt){
+  if(game.state!=='play'||game.paused)return;
+  autoSaveT+=dt;
+  if(autoSaveT>=30){autoSaveT=0;Save.save()}
 }
 
 /* ---------- 30. KAMERA ---------- */
-const camera = { x: 0, y: 0 };
-function clampCamX(v) { return Math.max(0, Math.min(WORLD_W - W, v)); }
-function clampCamY(v) { return Math.max(0, Math.min(WORLD_H - H, v)); }
-function snapCamera() {
-  if (player.scene === 'interior') { camera.x = (IN_W * TILE - W) / 2; camera.y = (IN_H * TILE - H) / 2; }
-  else { camera.x = clampCamX(player.x - W / 2); camera.y = clampCamY(player.y - H / 2); }
+function updateCamera(dt){
+  if(player.scene==='interior'){
+    // simple interior camera
+    camPos.x=player.x;
+    camPos.y=2.5;
+    camPos.z=player.z+4;
+    return;
+  }
+  const cy=Math.cos(camera.yaw),sy=Math.sin(camera.yaw);
+  const cp=Math.cos(camera.pitch),sp=Math.sin(camera.pitch);
+  const dist=camera.dist;
+  const targetX=player.x,targetZ=player.z,targetY=0.6;
+  camPos.x=targetX+sy*cp*dist;
+  camPos.y=targetY+sp*dist;
+  camPos.z=targetZ+cy*cp*dist;
 }
-function updateCamera(dt) {
-  if (player.scene === 'interior') { camera.x = (IN_W * TILE - W) / 2; camera.y = (IN_H * TILE - H) / 2; return; }
-  const tx = clampCamX(player.x - W / 2), ty = clampCamY(player.y - H / 2);
-  camera.x += (tx - camera.x) * 0.14;
-  camera.y += (ty - camera.y) * 0.14;
-  camera.x = clampCamX(camera.x); camera.y = clampCamY(camera.y);
+function getViewProj(){
+  const aspect=glCanvas.width/glCanvas.height;
+  const proj=M4.perspective(Math.PI/3,aspect,0.1,80);
+  const view=M4.lookAt([camPos.x,camPos.y,camPos.z],[player.x,0.6,player.z],[0,1,0]);
+  // view*proj
+  const vp=new Float32Array(16);
+  for(let i=0;i<4;i++)for(let j=0;j<4;j++){
+    let s=0;
+    for(let k=0;k<4;k++)s+=proj[k*4+j]*view[i*4+k];
+    vp[i*4+j]=s;
+  }
+  return vp;
 }
-
-/* ---------- 31. RENDER DUNIA ---------- */
-const renderList = [];
-const playerRender = { x: 0, y: 0, img: null, sortY: 0, isPlayer: true };
-let waterFrame = 0;
-function renderWorld() {
-  const camX = Math.round(camera.x), camY = Math.round(camera.y);
-  ctx.drawImage(worldGround, camX, camY, W, H, 0, 0, W, H);
-  const tx0 = Math.max(0, Math.floor(camX / TILE)), ty0 = Math.max(0, Math.floor(camY / TILE));
-  const tx1 = Math.min(MAP_W - 1, Math.floor((camX + W) / TILE)), ty1 = Math.min(MAP_H - 1, Math.floor((camY + H) / TILE));
-  for (let ty = ty0; ty <= ty1; ty++) for (let tx = tx0; tx <= tx1; tx++) {
-    const i = ty * MAP_W + tx;
-    if (ground[i] === T.WATER) { const img = assets.water[waterVariant[i]][waterFrame]; ctx.drawImage(img, tx * TILE - camX, ty * TILE - camY); }
-  }
-  for (let i = 0; i < flowers.length; i++) {
-    const f = flowers[i];
-    if (f.x + 16 < camX || f.x > camX + W || f.y + 16 < camY || f.y > camY + H) continue;
-    const fr = (Math.floor(game.time * 1.6 + f.phase) & 1);
-    ctx.drawImage(f.img[fr], f.x - camX, f.y - camY);
-  }
-  // foot particles
-  for (let i = 0; i < footParticles.length; i++) {
-    const p = footParticles[i];
-    const alpha = Math.max(0, p.life / 0.4) * 0.5;
-    ctx.fillStyle = 'rgba(120,90,70,' + alpha + ')';
-    ctx.fillRect(Math.round(p.x - camX), Math.round(p.y - camY + 14), 2, 1);
-  }
-  for (let i = 0; i < digSpots.length; i++) {
-    const d = digSpots[i];
-    const dx = d.x - 4 - camX, dy = d.y - 2 - camY;
-    if (dx < -16 || dx > W || dy < -16 || dy > H) continue;
-    ctx.fillStyle = '#7d5738'; ctx.fillRect(dx + 1, dy + 2, 6, 2);
-    ctx.fillStyle = '#5a3a20'; ctx.fillRect(dx + 1, dy + 4, 6, 1);
-    ctx.fillStyle = '#a3764f'; ctx.fillRect(dx + 2, dy + 3, 4, 1);
-  }
-  renderList.length = 0;
-  for (let i = 0; i < objects.length; i++) {
-    const o = objects[i];
-    if (o.x + o.img.width < camX || o.x > camX + W) continue;
-    if (o.y + o.img.height < camY || o.y > camY + H) continue;
-    renderList.push(o);
-  }
-  for (let i = 0; i < bugs.length; i++) {
-    const b = bugs[i];
-    if (b.x < camX - 16 || b.x > camX + W + 16 || b.y < camY - 16 || b.y > camY + H + 16) continue;
-    const bf = Math.floor(b.phase) & 1;
-    const sp = bugSprites[b.id + '_' + bf];
-    if (sp) { ctx.drawImage(sp, Math.round(b.x - 6 - camX), Math.round(b.y - 6 - camY)); }
-  }
-  for (let i = 0; i < npcs.length; i++) {
-    const npc = npcs[i];
-    if (npc.x - 8 + 16 < camX || npc.x - 8 > camX + W) continue;
-    if (npc.y - 16 + 16 < camY || npc.y - 16 > camY + H) continue;
-    const ro = npc.renderObj;
-    ro.x = Math.round(npc.x - 8); ro.y = Math.round(npc.y - 16);
-    ro.img = npc.sprites[npc.dir][npc.frame]; ro.sortY = Math.round(npc.y);
-    renderList.push(ro);
-  }
-  playerRender.x = Math.round(player.x - 8); playerRender.y = Math.round(player.y - 16);
-  playerRender.img = assets.player[player.dir][player.frame]; playerRender.sortY = Math.round(player.y);
-  renderList.push(playerRender);
-  renderList.sort((a, b) => a.sortY - b.sortY);
-  for (let i = 0; i < renderList.length; i++) {
-    const o = renderList[i];
-    const dx = Math.round(o.x - camX), dy = Math.round(o.y - camY);
-    if (o.isPlayer || o.isNPC) ctx.drawImage(playerShadow, dx, dy + 12);
-    ctx.drawImage(o.img, dx, dy);
-  }
-  if (fishing.state === 'waiting' || fishing.state === 'bite' || fishing.state === 'casting') {
-    const sx = Math.round(player.x - camX), sy = Math.round(player.y - camY - 4);
-    const ex = Math.round(fishing.castX - camX), ey = Math.round(fishing.castY - camY);
-    ctx.fillStyle = 'rgba(255,255,255,0.7)';
-    const steps = Math.max(Math.abs(ex - sx), Math.abs(ey - sy));
-    for (let i = 0; i <= steps; i++) {
-      const t = i / steps;
-      ctx.fillRect(Math.round(sx + (ex - sx) * t), Math.round(sy + (ey - sy) * t), 1, 1);
-    }
-    if (fishing.state === 'bite') drawText('!', ex - 1, ey - 10, C.uiGold);
-  }
-}
-function renderInterior() {
-  const camX = Math.round(camera.x), camY = Math.round(camera.y);
-  ctx.fillStyle = '#1a1412'; ctx.fillRect(0, 0, W, H);
-  ctx.drawImage(interior.canvas, camX, camY);
-  const px = Math.round(player.x - 8 - camX), py = Math.round(player.y - 16 - camY);
-  ctx.drawImage(playerShadow, px, py + 12);
-  ctx.drawImage(assets.player[player.dir][player.frame], px, py);
-}
-function applyTint() {
-  const t1 = TimeSys.getTint(), t2 = Weather.getTint();
-  if (t1 && t1.a > 0) { ctx.fillStyle = 'rgba(' + t1.r + ',' + t1.g + ',' + t1.b + ',' + t1.a + ')'; ctx.fillRect(0, 0, W, H); }
-  if (t2 && t2.a > 0) { ctx.fillStyle = 'rgba(' + t2.r + ',' + t2.g + ',' + t2.b + ',' + t2.a + ')'; ctx.fillRect(0, 0, W, H); }
-  Weather.render();
-  Weather.renderFireflies(); // Added fireflies overlay here so it pops out of tint
+function getCamRightUp(){
+  const fx=player.x-camPos.x,fy=0.6-camPos.y,fz=player.z-camPos.z;
+  const fl=Math.sqrt(fx*fx+fy*fy+fz*fz)||1;
+  const fwd=[fx/fl,fy/fl,fz/fl];
+  const r=V3.norm(V3.cross([0,1,0],fwd));
+  const u=V3.cross(fwd,r);
+  return{right:r,up:u};
 }
 
-/* ---------- 32. RENDER UI ---------- */
-function renderHUD() {
-  drawPanel(4, 4, 68, 15);
-  drawText(player.scene === 'interior' ? 'RUMAH' : 'DESA', 9, 8, C.uiGold);
-  const wIcon = Weather.type === 'sunny' ? 'CERAH' : (Weather.type === 'rain' ? 'HUJAN' : 'ANGIN');
-  const topStr = TimeSys.format() + ' ' + wIcon;
-  const tw = textWidth(topStr) + 10;
-  drawPanel(W - tw - 4, 4, tw, 15);
-  drawText(topStr, W - tw + 1, 8, C.uiText);
-  const mStr = money.amount + 'K';
-  const mw = textWidth(mStr) + 10;
-  drawPanel(W - mw - 4, 21, mw, 13);
-  drawText(mStr, W - mw + 1, 24, C.uiGold);
-  
-  // Render Mute icon on touch device conditionally based on space, skip if cluttering
-  if (!Touch.active) {
-    const muteX = 4, muteY = 21;
-    drawPanel(muteX, muteY, 20, 13);
-    drawText(AudioSys.muted ? 'X' : 'S', muteX + 8, muteY + 3, AudioSys.muted ? C.uiRed : C.uiGreen);
+/* ---------- 31. GAME LOGIC: UPDATE ---------- */
+function updatePlayer(dt){
+  if(fishing.state!=='idle'){player.moving=false;player.frame=0;return}
+  let x=0,z=0;
+  if(keys['KeyA']||keys['ArrowLeft'])x-=1;
+  if(keys['KeyD']||keys['ArrowRight'])x+=1;
+  if(keys['KeyW']||keys['ArrowUp'])z-=1;
+  if(keys['KeyS']||keys['ArrowDown'])z+=1;
+  // touch
+  x+=Touch.axisX;z+=Touch.axisZ;
+  const len=Math.sqrt(x*x+z*z);
+  if(len<0.15){player.moving=false;player.animT=0;player.frame=0;return}
+  player.moving=true;
+  if(len>1){x/=len;z/=len}
+  // camera-relative movement: forward = camera direction projected to ground
+  const cy=Math.cos(camera.yaw),sy=Math.sin(camera.yaw);
+  // camera looks toward player from (sy*dist, ..., cy*dist)
+  // forward = -direction from cam to player in xz = (-sy*cp, -cy*cp) normalized
+  // for simplicity: forward = (-sy, -cy)
+  const fx=-sy,fz=-cy;
+  const rx=cy,rz=-sy;
+  const wx=x*rx+z*fx;
+  const wz=x*rz+z*fz;
+  const wl=Math.sqrt(wx*wx+wz*wz)||1;
+  const sp=SPEED*dt;
+  tryMove(player,wx/wl*sp,wz/wl*sp,PLAYER_HW,PLAYER_HH);
+  // facing
+  if(Math.abs(wx)>Math.abs(wz))player.dir=wx>0?'right':'left';
+  else player.dir=wz>0?'down':'up';
+  player.animT+=dt;
+  player.frame=Math.floor(player.animT*8)%4;
+}
+function findNearestNPC(){
+  let n=null,bd=INTERACT_R;
+  for(const npc of npcs){
+    const d=Math.hypot(npc.x-player.x,npc.z-player.z);
+    if(d<bd){bd=d;n=npc}
   }
+  return n;
 }
-function renderHotbar() {
-  if (Touch.active && (invUI.open || shop.open || CollectionSys.open)) return; // Sembunyikan kalau tertutup UI
-  
-  const slots = 5, sw = 20, gap = 2;
-  const totalW = slots * sw + (slots - 1) * gap;
-  const x0 = Math.round((W - totalW) / 2), y0 = H - 22;
-  const active = inventory.slots[inventory.activeTool];
-  if (active && ITEMS[active.id]) drawTextCentered(ITEMS[active.id].name.toUpperCase(), W / 2, y0 - 9, C.uiText);
-  for (let i = 0; i < slots; i++) {
-    const sx = x0 + i * (sw + gap);
-    const isSel = i === inventory.activeTool;
-    ctx.fillStyle = 'rgba(26,20,18,0.92)';
-    ctx.fillRect(sx, y0, sw, sw);
-    ctx.fillStyle = isSel ? C.uiGold : C.uiDim;
-    ctx.fillRect(sx, y0, sw, 1); ctx.fillRect(sx, y0 + sw - 1, sw, 1);
-    ctx.fillRect(sx, y0, 1, sw); ctx.fillRect(sx + sw - 1, y0, 1, sw);
-    const slot = inventory.slots[i];
-    if (slot && itemIcons[slot.id]) ctx.drawImage(itemIcons[slot.id], sx + 2, y0 + 2);
-    if(!Touch.active) drawText(String(i + 1), sx + 1, y0 + 1, isSel ? C.uiGold : C.uiDim);
+function nearShop(){return Math.hypot(34.5-player.x,22.5-player.z)<1.8}
+function nearHouse(){
+  for(const o of objects){
+    if(o.kind!=='house')continue;
+    if(Math.hypot(o.doorX-player.x,o.doorY-player.z)<1.8)return o;
   }
+  return null;
 }
-function renderInventory() {
-  ctx.fillStyle = 'rgba(16,12,10,0.60)'; ctx.fillRect(0, 0, W, H);
-  const pw = 180, ph = 128;
-  const px = Math.round((W - pw) / 2), py = Math.round((H - ph) / 2);
-  drawPanel(px, py, pw, ph);
-  drawTextCentered(invUI.mode === 'gift' ? 'PILIH HADIAH' : 'TAS (JOYSTICK: PILIH)', W / 2, py + 7, C.uiGold);
-  const cols = 5, rows = 4, sw = 22, gap = 2;
-  const gridW = cols * sw + (cols - 1) * gap;
-  const gx = Math.round(px + (pw - gridW) / 2), gy = py + 20;
-  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
-    const idx = r * cols + c;
-    const sx = gx + c * (sw + gap), sy = gy + r * (sw + gap);
-    ctx.fillStyle = 'rgba(20,15,13,0.85)'; ctx.fillRect(sx, sy, sw, sw);
-    const isSel = idx === invUI.cursor;
-    ctx.fillStyle = isSel ? C.uiGold : C.uiDim;
-    ctx.fillRect(sx, sy, sw, 1); ctx.fillRect(sx, sy + sw - 1, sw, 1);
-    ctx.fillRect(sx, sy, 1, sw); ctx.fillRect(sx + sw - 1, sy, 1, sw);
-    const slot = inventory.slots[idx];
-    if (slot && itemIcons[slot.id]) {
-      ctx.drawImage(itemIcons[slot.id], sx + 3, sy + 3);
-      if (slot.count > 1) drawText(String(slot.count), sx + sw - 6, sy + sw - 8, C.uiText);
-    }
-    if (idx < 5 && !Touch.active) drawText(String(idx + 1), sx + 1, sy + 1, C.uiDim);
+function interact(){
+  if(player.scene==='interior'){
+    message.show('TEKAN ESC UNTUK KELUAR',1.2);return;
   }
-  const sel = inventory.slots[invUI.cursor];
-  let infoY = gy + rows * (sw + gap) + 4;
-  if (sel && ITEMS[sel.id]) { drawText(ITEMS[sel.id].name, gx, infoY, C.uiText); infoY += 9; drawText(ITEMS[sel.id].desc, gx, infoY, C.uiDim); }
-  else drawText('KOSONG', gx, infoY, C.uiDim);
-  
-  let hint = invUI.mode === 'gift' ? 'ENTER/A: BERI   ESC/B: BATAL' : 'ENTER/A: PAKAI   ESC/B: TUTUP';
-  drawTextCentered(hint, W / 2, py + ph - 11, C.uiGold);
+  const npc=findNearestNPC();
+  if(npc){startDialog(npc);return}
+  if(nearShop()){shop.open=true;shop.tab=0;shop.cursor=0;Audio.sfx('menu');return}
+  if(nearHouse()){message.show('RUMAH - FITUR SEGERA',1.5);return}
+  const slot=inv.active_item();
+  if(!slot){message.show('TANGAN KOSONG',1.0);return}
+  const id=slot.id;
+  if(id==='rod'){startFishing();return}
+  if(id==='net'){tryCatchBug();return}
+  if(id==='shovel'){tryDig();return}
+  if(id==='axe'){tryChop();return}
+  if(id==='seed'){tryPlant();return}
+  if(id==='water'){message.show('PENYIRAM DIPAKAI',1.0);return}
+  message.show(ITEMS[id].name.toUpperCase()+' DIPAKAI',1.0);
 }
-function renderDialog() {
-  if (!dialog.active || !dialog.npc) return;
-  const px = 6, py = H - 44, pw = W - 12, ph = 40;
-  drawPanel(px, py, pw, ph);
-  drawText(dialog.npc.name, px + 6, py + 5, C.uiGold);
-  drawText(dialog.text, px + 6, py + 16, C.uiText);
-  if (dialog.typewriterDone) {
-    drawText(isLastLine() ? (Touch.active ? 'A: TUTUP  G: HADIAH' : 'E: TUTUP   G: HADIAH   ESC: KELUAR') : (Touch.active ? 'SENTUH / A: LANJUT' : 'E: LANJUT'), px + 6, py + 29, C.uiDim);
-  } else drawText(Touch.active ? 'SENTUH / A: LEWATI' : 'E: LEWATI', px + 6, py + 29, C.uiDim);
-}
-function renderMessage() {
-  if (message.timer <= 0) return;
-  const tw = textWidth(message.text) + 10;
-  const tx = Math.round((W - tw) / 2);
-  drawPanel(tx, 40, tw, 14);
-  drawTextCentered(message.text, W / 2, 44, C.uiText);
-}
-function renderFishingUI() {
-  if (fishing.state === 'idle') return;
-  if (fishing.state === 'casting') drawTextCentered('MELEMPAR KAIL...', W / 2, 70, C.uiText);
-  else if (fishing.state === 'waiting') drawTextCentered('MENUNGGU IKAN...', W / 2, 70, C.uiText);
-  else if (fishing.state === 'bite') {
-    drawTextCentered('! TARIK SEKARANG !', W / 2, 60, C.uiGold);
-    if ((Math.floor(game.time * 8) & 1) === 0) drawTextCentered(Touch.active ? 'TEKAN A' : 'TEKAN E', W / 2, 72, C.uiText);
-  } else if (fishing.state === 'minigame') {
-    const bw = 160, bh = 8;
-    const bx = Math.round((W - bw) / 2), by = 86;
-    ctx.fillStyle = 'rgba(26,20,18,0.92)'; ctx.fillRect(bx - 2, by - 10, bw + 4, bh + 24);
-    ctx.fillStyle = '#2a1e16'; ctx.fillRect(bx, by, bw, bh);
-    ctx.fillStyle = C.uiGreen; ctx.fillRect(bx + Math.round(bw * 0.35), by, Math.round(bw * 0.30), bh);
-    const cx = bx + Math.round((fishing.cursor / 100) * bw);
-    ctx.fillStyle = C.uiGold; ctx.fillRect(cx - 1, by - 2, 3, bh + 4);
-    drawTextCentered(Touch.active ? 'TEKAN A DI ZONA HIJAU' : 'TEKAN E DI ZONA HIJAU', W / 2, by + bh + 4, C.uiText);
-  } else if (fishing.state === 'result') drawTextCentered(fishing.result, W / 2, 70, C.uiGold);
-}
-function renderShop() {
-  if (!shop.open) return;
-  ctx.fillStyle = 'rgba(16,12,10,0.65)'; ctx.fillRect(0, 0, W, H);
-  const pw = 200, ph = 140;
-  const px = Math.round((W - pw) / 2), py = Math.round((H - ph) / 2);
-  drawPanel(px, py, pw, ph);
-  drawTextCentered('TOKO EMBUN', W / 2, py + 6, C.uiGold);
-  const tabY = py + 18, tabW = 60;
-  for (let t = 0; t < 2; t++) {
-    const tx = px + 10 + t * (tabW + 4);
-    const isSel = shop.tab === t;
-    ctx.fillStyle = isSel ? 'rgba(255,207,107,0.20)' : 'rgba(20,15,13,0.7)';
-    ctx.fillRect(tx, tabY, tabW, 12);
-    ctx.fillStyle = isSel ? C.uiGold : C.uiDim;
-    ctx.fillRect(tx, tabY, tabW, 1); ctx.fillRect(tx, tabY + 11, tabW, 1);
-    ctx.fillRect(tx, tabY, 1, 12); ctx.fillRect(tx + tabW - 1, tabY, 1, 12);
-    drawText(t === 0 ? 'BELI' : 'JUAL', tx + (tabW >> 1) - 12, tabY + 3, isSel ? C.uiGold : C.uiDim);
+function rebuildChunk(cx,cy){
+  const idx=cy*NUM_CHUNKS_X+cx;
+  const old=chunks[idx];
+  if(old){
+    gl.deleteBuffer(old.posBuf);gl.deleteBuffer(old.colBuf);gl.deleteBuffer(old.nrmBuf);
   }
-  const lx = px + 10; let ly = tabY + 18;
-  if (shop.tab === 0) {
-    for (let i = 0; i < shop.buyList.length; i++) {
-      const it = shop.buyList[i], isSel = i === shop.cursor;
-      ctx.fillStyle = isSel ? 'rgba(255,207,107,0.18)' : 'rgba(0,0,0,0.25)';
-      ctx.fillRect(lx, ly, pw - 20, 14);
-      if (itemIcons[it.id]) ctx.drawImage(itemIcons[it.id], lx + 2, ly - 1);
-      drawText(ITEMS[it.id].name, lx + 20, ly + 4, isSel ? C.uiGold : C.uiText);
-      drawText(String(it.price) + 'K', px + pw - 24, ly + 4, C.uiGold);
-      ly += 16;
-    }
-  } else {
-    for (let i = 0; i < 8; i++) {
-      const slot = inventory.slots[i], isSel = i === shop.cursor;
-      ctx.fillStyle = isSel ? 'rgba(255,207,107,0.18)' : 'rgba(0,0,0,0.25)';
-      ctx.fillRect(lx, ly, pw - 20, 12);
-      if (slot && itemIcons[slot.id]) {
-        ctx.drawImage(itemIcons[slot.id], lx + 2, ly - 1);
-        drawText(ITEMS[slot.id].name, lx + 20, ly + 3, isSel ? C.uiGold : C.uiText);
-        drawText('+' + getSellPrice(slot.id) + 'K', px + pw - 24, ly + 3, C.uiGold);
-      } else drawText('-KOSONG-', lx + 20, ly + 3, C.uiDim);
-      ly += 13;
-    }
-  }
-  drawText('KEPING: ' + money.amount, lx, py + ph - 22, C.uiGold);
-  drawTextCentered(Touch.active ? 'A: BELI/JUAL   B: GANTI TAB   ESC: TUTUP' : 'ENTER: AKSI   TAB: UBAH   ESC: TUTUP', W / 2, py + ph - 11, C.uiDim);
-}
-function renderCollection() {
-  if (!CollectionSys.open) return;
-  ctx.fillStyle = 'rgba(16,12,10,0.72)'; ctx.fillRect(0, 0, W, H);
-  const pw = 220, ph = 140;
-  const px = Math.round((W - pw) / 2), py = Math.round((H - ph) / 2);
-  drawPanel(px, py, pw, ph);
-  drawTextCentered('ENSIKLOPEDIA', W / 2, py + 6, C.uiGold);
-  drawTextCentered('IKAN & SERANGGA', W / 2, py + 16, C.uiDim);
-  const list = CollectionSys.list;
-  const colW = (pw - 16) / 2;
-  let y0 = py + 30;
-  for (let i = 0; i < list.length; i++) {
-    const id = list[i], col = i < 5 ? 0 : 1, row = i % 5;
-    const lx = px + 8 + col * colW, ly = y0 + row * 18;
-    const caught = CollectionSys.has(id);
-    ctx.fillStyle = caught ? 'rgba(138,223,122,0.15)' : 'rgba(0,0,0,0.25)';
-    ctx.fillRect(lx, ly, colW - 6, 16);
-    if (itemIcons[id]) {
-      ctx.globalAlpha = caught ? 1 : 0.30;
-      ctx.drawImage(itemIcons[id], lx + 2, ly);
-      ctx.globalAlpha = 1;
-    }
-    drawText(caught ? ITEMS[id].name : '???', lx + 20, ly + 5, caught ? C.uiText : C.uiDim);
-  }
-  drawTextCentered('ESC / BUKU: TUTUP', W / 2, py + ph - 11, C.uiGold);
-}
-function renderPause() {
-  ctx.fillStyle = 'rgba(16,12,10,0.60)'; ctx.fillRect(0, 0, W, H);
-  const pw = 200, ph = 130;
-  const px = (W - pw) >> 1, py = (H - ph) >> 1;
-  drawPanel(px, py, pw, ph);
-  drawTextCentered('JEDA', W / 2, py + 8, C.uiGold);
-  
-  if (Touch.active) {
-    const lines = ['JOYSTICK : BERJALAN / NAVIGASI','TOMBOL A : INTERAKSI / OK','TOMBOL B : BUKA TAS / KEMBALI','TOMBOL T : GANTI ALAT','TOMBOL C : ENSIKLOPEDIA'];
-    for (let i = 0; i < lines.length; i++) drawText(lines[i], px + 8, py + 22 + i * 11, C.uiText);
-  } else {
-    const lines = ['WASD / PANAH : BERJALAN','E / SPASI    : INTERAKSI','Q / 1-5      : GANTI ALAT','I : TAS    C : ENSIKLOPEDIA','M : SUARA   F : SIMPAN'];
-    for (let i = 0; i < lines.length; i++) drawText(lines[i], px + 8, py + 22 + i * 9, C.uiText);
-  }
-  drawText('WAKTU: ' + TimeSys.format() + ' ' + TimeSys.getPhase(), px + 8, py + ph - 22, C.uiDim);
-  drawTextCentered('ESC / || UNTUK LANJUT', W / 2, py + ph - 11, C.uiGold);
-}
-function renderTutorial() {
-  if (game.tutorialShown) return;
-  ctx.fillStyle = 'rgba(16,12,10,0.72)'; ctx.fillRect(0, 0, W, H);
-  const pw = 240, ph = 110;
-  const px = (W - pw) >> 1, py = (H - ph) >> 1;
-  drawPanel(px, py, pw, ph);
-  drawTextCentered('SELAMAT DATANG DI', W / 2, py + 8, C.uiDim);
-  drawTextCentered('PONDOK EMBUN', W / 2, py + 18, C.uiGold);
-  
-  const lines = Touch.active 
-    ? ['SENTUH JOYSTICK KIRI : BERJALAN', 'SENTUH TOMBOL A KANAN: INTERAKSI', 'TOMBOL T : GANTI ALAT', 'TOMBOL B : BUKA TAS/INVENTARIS', 'CARI PENDUDUK & BICARA!']
-    : ['WASD / PANAH : BERJALAN', 'E / SPASI    : BICARA & PAKAI ALAT', 'Q / 1-5      : GANTI ALAT', 'I : TAS   C : ENSIKLOPEDIA', 'CARI PENDUDUK & BICARA!'];
-    
-  for (let i = 0; i < lines.length; i++) drawTextCentered(lines[i], W / 2, py + 32 + i * 10, i === lines.length-1 ? C.uiGold : C.uiText);
-  
-  if ((Math.floor(game.time * 2) & 1) === 0) drawTextCentered(Touch.active ? 'SENTUH LAYAR / A UNTUK MULAI' : 'TEKAN E UNTUK MULAI', W / 2, py + ph - 11, C.uiGold);
-}
-function renderTitle() {
-  if (worldGround) renderWorld();
-  else { ctx.fillStyle = C.grass1; ctx.fillRect(0, 0, W, H); }
-  applyTint();
-  ctx.fillStyle = 'rgba(20,15,13,0.66)'; ctx.fillRect(0, 0, W, H);
-  const pw = 232, ph = 130;
-  const px = (W - pw) >> 1, py = (H - ph) >> 1;
-  drawPanel(px, py, pw, ph);
-  drawTextCentered('PONDOK EMBUN', W / 2, py + 12, C.uiGold);
-  drawTextCentered('DESA KECIL YANG HANGAT', W / 2, py + 26, C.uiDim);
-  ctx.fillStyle = C.uiBorder; ctx.fillRect(px + 16, py + 40, pw - 32, 1);
-  if ((Math.floor(game.time * 2) & 1) === 0) drawTextCentered(Touch.active ? 'SENTUH LAYAR / A UNTUK MULAI' : 'TEKAN ENTER UNTUK MULAI', W / 2, py + 54, C.uiText);
-  if (game.hasSave) drawTextCentered(Touch.active ? 'SENTUH TOMBOL B UNTUK LANJUTKAN' : 'L: LANJUTKAN PERMAINAN', W / 2, py + 70, C.uiGreen);
-  drawTextCentered('ENHANCED MOBILE EDITION', W / 2, py + 98, C.uiGold);
-  drawTextCentered('ORISINAL - TANPA ASET EKSTERNAL', W / 2, py + 112, C.uiDim);
+  const data=buildChunk(cx,cy);
+  if(data.verts.length===0){chunks[idx]=null;return}
+  const posBuf=gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER,posBuf);
+  gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(data.verts),gl.STATIC_DRAW);
+  const colBuf=gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER,colBuf);
+  gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(data.colors),gl.STATIC_DRAW);
+  const nrmBuf=gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER,nrmBuf);
+  gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(data.norms),gl.STATIC_DRAW);
+  chunks[idx]={posBuf,colBuf,nrmBuf,count:data.verts.length/3,meta:data};
 }
 
-/* ---------- 33. LOOP ---------- */
-let lastTime = 0, accumulator = 0, rafId = 0;
-function update(dt) {
-  game.time += dt;
-  if (game.paused) return;
-  TimeSys.update();
-  Weather.update(dt);
-  AudioSys.tickAmbient(dt);
-  updateDialog(dt);
-  updateFishing(dt);
-  
-  if (Touch.active) Touch.updateUI(dt);
-
-  if (!game.tutorialShown) return; // pause semua saat tutorial
-  if (fishing.state === 'idle' && !dialog.active && !invUI.open && !shop.open && !CollectionSys.open) {
-    updatePlayer(dt);
-    updateNPCs(dt);
-  }
-  updateBugs(dt);
-  updateDigSpots(dt);
-  updateFootParticles(dt);
-  updateCamera(dt);
-  waterFrame = Math.floor(game.time * 4) % 3;
-  if (message.timer > 0) message.timer -= dt;
-  autoSaveTick(dt);
+/* ---------- 32. UI RENDERING ---------- */
+function renderHUD(){
+  panel(4,4,60,13);
+  drawText(player.scene==='interior'?'RUMAH':'DESA',8,7,COL.uiGold);
+  const w=Weather.type==='sunny'?'CERAH':(Weather.type==='rain'?'HUJAN':'ANGIN');
+  const s=TimeSys.fmt()+' '+w;
+  const sw=tw(s)+8;
+  panel(UI_W-sw-4,4,sw,13);
+  drawText(s,UI_W-sw,7,COL.uiText);
+  const m=money.amount+'K';
+  const mw=tw(m)+8;
+  panel(UI_W-mw-4,19,mw,11);
+  drawText(m,UI_W-mw,22,COL.uiGold);
+  // Mute button
+  panel(4,19,20,11);
+  drawText(Audio.muted?'X':'S',9,22,Audio.muted?COL.uiRed:COL.uiGreen);
 }
-function render() {
-  ctx.clearRect(0, 0, W, H);
-  if (game.state === 'title') { renderTitle(); if (Touch.active) Touch.render(); present(); return; }
-  if (player.scene === 'interior') renderInterior();
-  else renderWorld();
-  applyTint();
+function renderHotbar(){
+  const sw=18,gap=2,n=5;
+  const totalW=n*sw+(n-1)*gap;
+  const x0=Math.round((UI_W-totalW)/2);
+  const y0=UI_H-20;
+  const active=inv.slots[inv.active];
+  if(active&&ITEMS[active.id]){
+    drawTextC(ITEMS[active.id].name,UI_W/2,y0-9,COL.uiText);
+  }
+  for(let i=0;i<n;i++){
+    const x=x0+i*(sw+gap);
+    const sel=i===inv.active;
+    uctx.fillStyle='rgba(26,20,18,0.92)';
+    uctx.fillRect(x,y0,sw,sw);
+    uctx.fillStyle=sel?'rgb(255,207,107)':'rgb(185,169,154)';
+    uctx.fillRect(x,y0,sw,1);uctx.fillRect(x,y0+sw-1,sw,1);
+    uctx.fillRect(x,y0,1,sw);uctx.fillRect(x+sw-1,y0,1,sw);
+    const slot=inv.slots[i];
+    if(slot){
+      const c=ITEM_COLORS[slot.id]||[0.7,0.7,0.7];
+      uctx.fillStyle='rgb('+Math.round(c[0]*255)+','+Math.round(c[1]*255)+','+Math.round(c[2]*255)+')';
+      uctx.fillRect(x+3,y0+3,sw-6,sw-6);
+    }
+    drawText(String(i+1),x+1,y0+1,sel?COL.uiGold:COL.uiDim);
+  }
+}
+function renderInventory(){
+  uctx.fillStyle='rgba(16,12,10,0.6)';uctx.fillRect(0,0,UI_W,UI_H);
+  const pw=180,ph=124;
+  const px=Math.round((UI_W-pw)/2),py=Math.round((UI_H-ph)/2);
+  panel(px,py,pw,ph);
+  drawTextC(invUI.mode==='gift'?'PILIH HADIAH':'TAS',UI_W/2,py+7,COL.uiGold);
+  const cols=5,rows=4,sw=22,gap=2;
+  const gw=cols*sw+(cols-1)*gap;
+  const gx=Math.round(px+(pw-gw)/2),gy=py+18;
+  for(let r=0;r<rows;r++)for(let c=0;c<cols;c++){
+    const idx=r*cols+c;
+    const x=gx+c*(sw+gap),y=gy+r*(sw+gap);
+    uctx.fillStyle='rgba(20,15,13,0.85)';uctx.fillRect(x,y,sw,sw);
+    const sel=idx===invUI.cursor;
+    uctx.fillStyle=sel?'rgb(255,207,107)':'rgb(185,169,154)';
+    uctx.fillRect(x,y,sw,1);uctx.fillRect(x,y+sw-1,sw,1);
+    uctx.fillRect(x,y,1,sw);uctx.fillRect(x+sw-1,y,1,sw);
+    const slot=inv.slots[idx];
+    if(slot){
+      const co=ITEM_COLORS[slot.id]||[0.7,0.7,0.7];
+      uctx.fillStyle='rgb('+Math.round(co[0]*255)+','+Math.round(co[1]*255)+','+Math.round(co[2]*255)+')';
+      uctx.fillRect(x+4,y+4,sw-8,sw-8);
+      if(slot.n>1)drawText(String(slot.n),x+sw-6,y+sw-9,COL.uiText);
+    }
+    if(idx<5)drawText(String(idx+1),x+1,y+1,COL.uiDim);
+  }
+  const sel=inv.slots[invUI.cursor];
+  let iy=gy+rows*(sw+gap)+4;
+  if(sel&&ITEMS[sel.id]){drawText(ITEMS[sel.id].name,gx,iy,COL.uiText);iy+=9;drawText(ITEMS[sel.id].desc||'',gx,iy,COL.uiDim)}
+  else drawText('KOSONG',gx,iy,COL.uiDim);
+  const hint=invUI.mode==='gift'?'ENTER: BERI   ESC: BATAL':'ENTER: PAKAI   I/ESC: TUTUP';
+  drawTextC(hint,UI_W/2,py+ph-11,COL.uiGold);
+}
+function renderDialog(){
+  if(!dialog.active||!dialog.npc)return;
+  const px=6,py=UI_H-42,pw=UI_W-12,ph=38;
+  panel(px,py,pw,ph);
+  drawText(dialog.npc.name,px+6,py+5,COL.uiGold);
+  drawText(dialog.text,px+6,py+15,COL.uiText);
+  if(dialog.done){
+    drawText(dialog.idx>=dialog.lines.length-1?'E: TUTUP   G: HADIAH   ESC: KELUAR':'E: LANJUT',px+6,py+27,COL.uiDim);
+  }else drawText('E: LEWATI',px+6,py+27,COL.uiDim);
+}
+function renderMessage(){
+  if(message.timer<=0)return;
+  const w=tw(message.text)+10;
+  const x=Math.round((UI_W-w)/2);
+  panel(x,42,w,13);
+  drawTextC(message.text,UI_W/2,45,COL.uiText);
+}
+function renderFishingUI(){
+  if(fishing.state==='idle')return;
+  if(fishing.state==='casting')drawTextC('MELEMPAR KAIL...',UI_W/2,68,COL.uiText);
+  else if(fishing.state==='waiting')drawTextC('MENUNGGU IKAN...',UI_W/2,68,COL.uiText);
+  else if(fishing.state==='bite'){
+    drawTextC('! TARIK SEKARANG !',UI_W/2,58,COL.uiGold);
+    if((Math.floor(game.time*8)&1)===0)drawTextC('TEKAN E',UI_W/2,70,COL.uiText);
+  }else if(fishing.state==='minigame'){
+    const bw=160,bh=8;
+    const bx=Math.round((UI_W-bw)/2),by=84;
+    uctx.fillStyle='rgba(26,20,18,0.92)';uctx.fillRect(bx-2,by-10,bw+4,bh+24);
+    uctx.fillStyle='#2a1e16';uctx.fillRect(bx,by,bw,bh);
+    uctx.fillStyle='rgb(138,223,122)';uctx.fillRect(bx+Math.round(bw*0.35),by,Math.round(bw*0.3),bh);
+    const cx=bx+Math.round((fishing.cursor/100)*bw);
+    uctx.fillStyle='rgb(255,207,107)';uctx.fillRect(cx-1,by-2,3,bh+4);
+    drawTextC('TEKAN E DI ZONA HIJAU',UI_W/2,by+bh+4,COL.uiText);
+  }else if(fishing.state==='result'){
+    drawTextC(fishing.result,UI_W/2,68,COL.uiGold);
+  }
+}
+function renderShop(){
+  if(!shop.open)return;
+  uctx.fillStyle='rgba(16,12,10,0.65)';uctx.fillRect(0,0,UI_W,UI_H);
+  const pw=200,ph=134;
+  const px=Math.round((UI_W-pw)/2),py=Math.round((UI_H-ph)/2);
+  panel(px,py,pw,ph);
+  drawTextC('TOKO EMBUN',UI_W/2,py+6,COL.uiGold);
+  const ty=py+18,tw_=60;
+  for(let t=0;t<2;t++){
+    const x=px+10+t*(tw_+4),sel=shop.tab===t;
+    uctx.fillStyle=sel?'rgba(255,207,107,0.2)':'rgba(20,15,13,0.7)';
+    uctx.fillRect(x,ty,tw_,12);
+    uctx.fillStyle=sel?'rgb(255,207,107)':'rgb(185,169,154)';
+    uctx.fillRect(x,ty,tw_,1);uctx.fillRect(x,ty+11,tw_,1);
+    uctx.fillRect(x,ty,1,12);uctx.fillRect(x+tw_-1,ty,1,12);
+    drawText(t===0?'BELI':'JUAL',x+14,ty+3,sel?COL.uiGold:COL.uiDim);
+  }
+  const lx=px+10;let ly=ty+18;
+  if(shop.tab===0){
+    for(let i=0;i<shop.buy.length;i++){
+      const it=shop.buy[i],sel=i===shop.cursor;
+      uctx.fillStyle=sel?'rgba(255,207,107,0.18)':'rgba(0,0,0,0.25)';
+      uctx.fillRect(lx,ly,pw-20,14);
+      drawText(ITEMS[it.id].name,lx+4,ly+4,sel?COL.uiGold:COL.uiText);
+      drawText(it.price+'K',px+pw-30,ly+4,COL.uiGold);
+      ly+=16;
+    }
+  }else{
+    for(let i=0;i<8;i++){
+      const s=inv.slots[i],sel=i===shop.cursor;
+      uctx.fillStyle=sel?'rgba(255,207,107,0.18)':'rgba(0,0,0,0.25)';
+      uctx.fillRect(lx,ly,pw-20,12);
+      if(s){
+        drawText(ITEMS[s.id].name,lx+4,ly+3,sel?COL.uiGold:COL.uiText);
+        drawText('+'+sellPrice(s.id)+'K',px+pw-30,ly+3,COL.uiGold);
+      }else drawText('-KOSONG-',lx+4,ly+3,COL.uiDim);
+      ly+=13;
+    }
+  }
+  drawText('KEPING: '+money.amount,lx,py+ph-22,COL.uiGold);
+  drawTextC(shop.tab===0?'ENTER: BELI   TAB: JUAL   ESC: TUTUP':'ENTER: JUAL   TAB: BELI   ESC: TUTUP',UI_W/2,py+ph-11,COL.uiDim);
+}
+function renderCollection(){
+  if(!Collection.open)return;
+  uctx.fillStyle='rgba(16,12,10,0.72)';uctx.fillRect(0,0,UI_W,UI_H);
+  const pw=220,ph=136;
+  const px=Math.round((UI_W-pw)/2),py=Math.round((UI_H-ph)/2);
+  panel(px,py,pw,ph);
+  drawTextC('ENSIKLOPEDIA',UI_W/2,py+6,COL.uiGold);
+  drawTextC('IKAN & SERANGGA',UI_W/2,py+16,COL.uiDim);
+  const list=Collection.list;
+  const cw=(pw-16)/2;
+  for(let i=0;i<list.length;i++){
+    const id=list[i],col=i<5?0:1,row=i%5;
+    const x=px+8+col*cw,y=py+28+row*18;
+    const caught=Collection.has(id);
+    uctx.fillStyle=caught?'rgba(138,223,122,0.15)':'rgba(0,0,0,0.25)';
+    uctx.fillRect(x,y,cw-6,16);
+    if(caught&&ITEM_COLORS[id]){
+      const c=ITEM_COLORS[id];
+      uctx.fillStyle='rgb('+Math.round(c[0]*255)+','+Math.round(c[1]*255)+','+Math.round(c[2]*255)+')';
+      uctx.fillRect(x+2,y+2,12,12);
+    }
+    drawText(caught?ITEMS[id].name:'???',x+18,y+5,caught?COL.uiText:COL.uiDim);
+  }
+  drawTextC('ESC: TUTUP',UI_W/2,py+ph-11,COL.uiGold);
+}
+function renderPause(){
+  uctx.fillStyle='rgba(16,12,10,0.6)';uctx.fillRect(0,0,UI_W,UI_H);
+  const pw=200,ph=126;
+  const px=(UI_W-pw)>>1,py=(UI_H-ph)>>1;
+  panel(px,py,pw,ph);
+  drawTextC('JEDA',UI_W/2,py+8,COL.uiGold);
+  const lines=['WASD/PANAH : JALAN','E/SPASI : INTERAKSI','Q/1-5 : GANTI ALAT','I : TAS   C : KOLEKSI','M : SUARA   F : SIMPAN'];
+  for(let i=0;i<lines.length;i++)drawText(lines[i],px+8,py+22+i*9,COL.uiText);
+  drawText('WAKTU: '+TimeSys.fmt()+' '+TimeSys.phase(),px+8,py+ph-22,COL.uiDim);
+  drawTextC('ESC UNTUK LANJUT',UI_W/2,py+ph-11,COL.uiGold);
+}
+function renderTutorial(){
+  if(game.tutorial)return;
+  uctx.fillStyle='rgba(16,12,10,0.72)';uctx.fillRect(0,0,UI_W,UI_H);
+  const pw=240,ph=110;
+  const px=(UI_W-pw)>>1,py=(UI_H-ph)>>1;
+  panel(px,py,pw,ph);
+  drawTextC('SELAMAT DATANG DI',UI_W/2,py+8,COL.uiDim);
+  drawTextC('PONDOK EMBUN 3D',UI_W/2,py+18,COL.uiGold);
+  const lines=['WASD / JOYSTICK : JALAN','DRAG : PUTAR KAMERA','E : BICARA / PAKAI ALAT','I : TAS   C : KOLEKSI','CARI PENDUDUK & BICARA!'];
+  for(let i=0;i<lines.length;i++)drawTextC(lines[i],UI_W/2,py+32+i*10,i===4?COL.uiGold:COL.uiText);
+  if((Math.floor(game.time*2)&1)===0)drawTextC('TEKAN E UNTUK MULAI',UI_W/2,py+ph-11,COL.uiGold);
+}
+function renderTitle(){
+  uctx.fillStyle='rgba(20,15,13,0.7)';uctx.fillRect(0,0,UI_W,UI_H);
+  const pw=232,ph=128;
+  const px=(UI_W-pw)>>1,py=(UI_H-ph)>>1;
+  panel(px,py,pw,ph);
+  drawTextC('PONDOK EMBUN 3D',UI_W/2,py+12,COL.uiGold);
+  drawTextC('DESA KECIL YANG HANGAT',UI_W/2,py+26,COL.uiDim);
+  uctx.fillStyle='rgb(243,227,200)';uctx.fillRect(px+16,py+40,pw-32,1);
+  if((Math.floor(game.time*2)&1)===0)drawTextC('TEKAN ENTER UNTUK MULAI',UI_W/2,py+54,COL.uiText);
+  if(game.hasSave)drawTextC('L: LANJUTKAN',UI_W/2,py+70,COL.uiGreen);
+  drawTextC('3D VOXEL - MOBILE READY',UI_W/2,py+86,COL.uiDim);
+  drawTextC('WEBGL MURNI - TANPA LIBRARY',UI_W/2,py+100,COL.uiDim);
+  drawTextC('ORISINAL - TANPA ASET EKSTERNAL',UI_W/2,py+114,COL.uiDim);
+}
+
+/* ---------- 33. RENDER LOOP ---------- */
+function renderScene(){
+  const vp=getViewProj();
+  const tint=TimeSys.lightTint();
+  gl.clearColor(tint[0]*0.55,tint[1]*0.68,tint[2]*0.85,1);
+  gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);
+  gl.enable(gl.DEPTH_TEST);
+  gl.disable(gl.CULL_FACE);
+
+  // Draw chunks
+  gl.useProgram(voxelProg);
+  gl.uniformMatrix4fv(vLoc.uVP,false,vp);
+  gl.uniform3f(vLoc.uLight,0.5,0.9,0.4);
+  for(const ch of chunks){
+    if(!ch)continue;
+    gl.bindBuffer(gl.ARRAY_BUFFER,ch.posBuf);
+    gl.enableVertexAttribArray(vLoc.aPos);
+    gl.vertexAttribPointer(vLoc.aPos,3,gl.FLOAT,false,0,0);
+    gl.bindBuffer(gl.ARRAY_BUFFER,ch.nrmBuf);
+    gl.enableVertexAttribArray(vLoc.aNormal);
+    gl.vertexAttribPointer(vLoc.aNormal,3,gl.FLOAT,false,0,0);
+    gl.bindBuffer(gl.ARRAY_BUFFER,ch.colBuf);
+    gl.enableVertexAttribArray(vLoc.aColor);
+    gl.vertexAttribPointer(vLoc.aColor,3,gl.FLOAT,false,0,0);
+    gl.drawArrays(gl.TRIANGLES,0,ch.count);
+  }
+
+  // Build billboards
+  resetBillboards();
+  // Player
+  const pDirRow=player.dir==='down'?0:(player.dir==='up'?1:(player.dir==='left'?2:2));
+  const pU0=player.frame/4,pU1=(player.frame+1)/4;
+  const pV0=(pDirRow*16)/(8*16),pV1=((pDirRow+1)*16)/(8*16);
+  addBillboard(player.x,1.2,player.z,1.7,pU0,pV0,pU1,pV1,[1,1,1,1]);
+  // NPCs
+  for(const npc of npcs){
+    const dr=npc.dir==='down'?0:(npc.dir==='up'?1:(npc.dir==='left'?2:2));
+    const row=npc.baseRow+dr;
+    const u0=npc.frame/4,u1=(npc.frame+1)/4;
+    const v0=(row*16)/(8*16),v1=((row+1)*16)/(8*16);
+    addBillboard(npc.x,1.15,npc.z,1.6,u0,v0,u1,v1,[1,1,1,1]);
+  }
+  // Bugs (small billboards - colored)
+  for(const b of bugs){
+    addBillboard(b.x,0.35,b.z,0.7,0,0,1,1,[1,1,1,1]);
+  }
+  // Dig spots
+  for(const d of digSpots){
+    addBillboard(d.x,0.1,d.z,0.8,0,0,1,1,[0.6,0.4,0.2,1]);
+  }
+
+  uploadBillboards();
+
+  // Draw billboards
+  if(bbCount>0){
+    gl.useProgram(bbProg);
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);
+    gl.disable(gl.DEPTH_TEST);
+    gl.uniformMatrix4fv(bLoc.uVP,false,vp);
+    const ru=getCamRightUp();
+    gl.uniform3fv(bLoc.uCamR,ru.right);
+    gl.uniform3fv(bLoc.uCamU,ru.up);
+    gl.uniform1i(bLoc.uTex,0);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D,spriteTex);
+    gl.bindBuffer(gl.ARRAY_BUFFER,bbPosBuf);
+    gl.enableVertexAttribArray(bLoc.aPos);
+    gl.vertexAttribPointer(bLoc.aPos,2,gl.FLOAT,false,0,0);
+    gl.bindBuffer(gl.ARRAY_BUFFER,bbUVBuf);
+    gl.enableVertexAttribArray(bLoc.aUV);
+    gl.vertexAttribPointer(bLoc.aUV,2,gl.FLOAT,false,0,0);
+    gl.bindBuffer(gl.ARRAY_BUFFER,bbCSBuf);
+    gl.enableVertexAttribArray(bLoc.aCS);
+    gl.vertexAttribPointer(bLoc.aCS,4,gl.FLOAT,false,0,0);
+    gl.bindBuffer(gl.ARRAY_BUFFER,bbTintBuf);
+    gl.enableVertexAttribArray(bLoc.aTint);
+    gl.vertexAttribPointer(bLoc.aTint,4,gl.FLOAT,false,0,0);
+    gl.drawArrays(gl.TRIANGLES,0,bbCount*6);
+    gl.disable(gl.BLEND);
+    gl.enable(gl.DEPTH_TEST);
+  }
+}
+
+/* ---------- 34. UI RENDER ---------- */
+function renderUI(){
+  uctx.clearRect(0,0,UI_W,UI_H);
+  if(game.state==='title'){
+    renderTitle();
+    if(Touch.active)Touch.render();
+    return;
+  }
   renderHUD();
   renderHotbar();
   renderMessage();
   renderFishingUI();
-  if (invUI.open) renderInventory();
-  else if (dialog.active) renderDialog();
-  if (shop.open) renderShop();
-  if (CollectionSys.open) renderCollection();
-  if (game.paused) renderPause();
-  if (!game.tutorialShown) renderTutorial();
-  if (Touch.active) Touch.render();
-  present();
-}
-function frame(now) {
-  rafId = requestAnimationFrame(frame);
-  let dt = (now - lastTime) / 1000;
-  lastTime = now;
-  if (!isFinite(dt) || dt < 0) dt = 0;
-  if (dt > 0.25) dt = 0.25;
-  if (!game.paused) {
-    accumulator += dt;
-    let steps = 0;
-    while (accumulator >= STEP && steps < 5) { update(STEP); accumulator -= STEP; steps++; }
-    if (steps >= 5) accumulator = 0;
-  } else game.time += dt;
-  render();
+  if(invUI.open)renderInventory();
+  else if(dialog.active)renderDialog();
+  if(shop.open)renderShop();
+  if(Collection.open)renderCollection();
+  if(game.paused)renderPause();
+  if(!game.tutorial)renderTutorial();
+  if(Touch.active)Touch.render();
 }
 
-/* ---------- 34. INPUT HANDLER ---------- */
-function onKeyPressed(code) {
-  // Tutorial dismiss
-  if (!game.tutorialShown && game.state === 'play') {
-    if (code === 'KeyE' || code === 'Space' || code === 'Enter') {
-      game.tutorialShown = true;
-      AudioSys.playSfx('menu');
-      SaveSys.save();
+/* ---------- 35. LOOP ---------- */
+let lastT=0,acc=0;
+function update(dt){
+  game.time+=dt;
+  if(game.paused)return;
+  TimeSys.update();
+  Weather.update(dt);
+  Audio.tick(dt);
+  updateDialog(dt);
+  updateFishing(dt);
+  if(!game.tutorial)return;
+  if(fishing.state==='idle'&&!dialog.active&&!invUI.open&&!shop.open&&!Collection.open){
+    updatePlayer(dt);
+    updateNPCs(dt);
+  }
+  updateBugs(dt);
+  updateDig(dt);
+  updateCamera(dt);
+  if(message.timer>0)message.timer-=dt;
+  autoSave(dt);
+}
+function frame(now){
+  requestAnimationFrame(frame);
+  let dt=(now-lastT)/1000;lastT=now;
+  if(!isFinite(dt)||dt<0)dt=0;
+  if(dt>0.25)dt=0.25;
+  if(!game.paused){
+    acc+=dt;
+    let n=0;
+    while(acc>=STEP&&n<5){update(STEP);acc-=STEP;n++}
+    if(n>=5)acc=0;
+  }else game.time+=dt;
+  updateCamera(0);
+  renderScene();
+  renderUI();
+}
+
+/* ---------- 36. INPUT HANDLER ---------- */
+function onKey(code){
+  if(!game.tutorial&&game.state==='play'){
+    if(code==='KeyE'||code==='Space'||code==='Enter'){
+      game.tutorial=true;Audio.sfx('menu');Save.save();
     }
     return;
   }
-  if (fishing.state === 'bite' || fishing.state === 'minigame') {
-    if (code === 'KeyE' || code === 'Space') { fishingPress(); return; }
+  if(fishing.state==='bite'||fishing.state==='minigame'){
+    if(code==='KeyE'||code==='Space'){fishingPress();return}
   }
-  if (fishing.state !== 'idle') { if (code === 'Escape') fishing.state = 'idle'; return; }
-  if (shop.open) {
-    if (code === 'Escape') { shop.open = false; AudioSys.playSfx('menu'); return; }
-    if (code === 'Tab') { shop.tab = (shop.tab + 1) % 2; shop.cursor = 0; AudioSys.playSfx('menu'); return; }
-    if (code === 'ArrowUp' || code === 'KeyW') shop.cursor = Math.max(0, shop.cursor - 1);
-    else if (code === 'ArrowDown' || code === 'KeyS') {
-      const max = shop.tab === 0 ? shop.buyList.length - 1 : 7;
-      shop.cursor = Math.min(max, shop.cursor + 1);
+  if(fishing.state!=='idle'){if(code==='Escape')fishing.state='idle';return}
+  if(shop.open){
+    if(code==='Escape'){shop.open=false;Audio.sfx('menu');return}
+    if(code==='Tab'){shop.tab=(shop.tab+1)%2;shop.cursor=0;Audio.sfx('menu');return}
+    if(code==='ArrowUp'||code==='KeyW')shop.cursor=Math.max(0,shop.cursor-1);
+    else if(code==='ArrowDown'||code==='KeyS'){
+      const mx=shop.tab===0?shop.buy.length-1:7;
+      shop.cursor=Math.min(mx,shop.cursor+1);
     }
-    else if (code === 'Enter' || code === 'Space' || code === 'KeyE') { if (shop.tab === 0) shopBuy(); else shopSell(); }
-    return;
-  }
-  if (CollectionSys.open) { if (code === 'Escape' || code === 'KeyC') CollectionSys.open = false; return; }
-  if (dialog.active) {
-    if (code === 'KeyE' || code === 'Space' || code === 'Enter') advanceDialog();
-    else if (code === 'KeyG') {
-      if (dialog.typewriterDone && isLastLine()) { invUI.open = true; invUI.mode = 'gift'; invUI.cursor = 0; }
-    } else if (code === 'Escape') closeDialog();
-    return;
-  }
-  if (invUI.open) {
-    if (code === 'Escape' || code === 'KeyI') { if (invUI.mode === 'gift') invUI.mode = 'normal'; invUI.open = false; return; }
-    if (code === 'ArrowLeft' || code === 'KeyA') invUI.cursor = Math.max(0, invUI.cursor - 1);
-    else if (code === 'ArrowRight' || code === 'KeyD') invUI.cursor = Math.min(19, invUI.cursor + 1);
-    else if (code === 'ArrowUp' || code === 'KeyW') invUI.cursor = Math.max(0, invUI.cursor - 5);
-    else if (code === 'ArrowDown' || code === 'KeyS') invUI.cursor = Math.min(19, invUI.cursor + 5);
-    else if (code === 'Enter' || code === 'Space' || code === 'KeyE') {
-      if (invUI.mode === 'gift') { if (inventory.slots[invUI.cursor]) giveGift(invUI.cursor); else message.show('SLOT KOSONG', 1.2); }
-      else { if (invUI.cursor < 5 && inventory.slots[invUI.cursor]) inventory.activeTool = invUI.cursor; }
+    else if(code==='Enter'||code==='Space'||code==='KeyE'){
+      if(shop.tab===0)shopBuy();else shopSell();
     }
     return;
   }
-  if (game.paused) {
-    if (code === 'Escape') { game.paused = false; lastTime = performance.now(); accumulator = 0; }
-    return;
-  }
-  if (game.state === 'title') {
-    if (code === 'Enter' || code === 'Space' || code === 'NumpadEnter' || code === 'KeyE') {
-      AudioSys.playSfx('enter');
-      game.state = 'play';
-      game.paused = false;
-      game.time = 0;
-      if (game.hasSave) {
-        const ok = SaveSys.load();
-        if (ok) message.show('PERMAINAN DIMUAT', 2);
-        else message.show('SIMPANAN RUSAK, MULAI BARU', 2);
+  if(Collection.open){if(code==='Escape'||code==='KeyC')Collection.open=false;return}
+  if(dialog.active){
+    if(code==='KeyE'||code==='Space'||code==='Enter')advanceDialog();
+    else if(code==='KeyG'){
+      if(dialog.done&&dialog.idx>=dialog.lines.length-1){
+        invUI.open=true;invUI.mode='gift';invUI.cursor=0;
       }
-      snapCamera();
-      SaveSys.save();
-    } else if (code === 'KeyL' && game.hasSave) {
-      AudioSys.playSfx('enter');
-      game.state = 'play';
-      game.paused = false;
-      game.time = 0;
-      SaveSys.load();
-      snapCamera();
-      message.show('PERMAINAN DIMUAT', 2);
+    }else if(code==='Escape')closeDialog();
+    return;
+  }
+  if(invUI.open){
+    if(code==='Escape'||code==='KeyI'){if(invUI.mode==='gift')invUI.mode='normal';invUI.open=false;return}
+    if(code==='ArrowLeft'||code==='KeyA')invUI.cursor=Math.max(0,invUI.cursor-1);
+    else if(code==='ArrowRight'||code==='KeyD')invUI.cursor=Math.min(19,invUI.cursor+1);
+    else if(code==='ArrowUp'||code==='KeyW')invUI.cursor=Math.max(0,invUI.cursor-5);
+    else if(code==='ArrowDown'||code==='KeyS')invUI.cursor=Math.min(19,invUI.cursor+5);
+    else if(code==='Enter'||code==='Space'||code==='KeyE'){
+      if(invUI.mode==='gift'){
+        if(inv.slots[invUI.cursor])giveGift(invUI.cursor);
+        else message.show('SLOT KOSONG',1.2);
+      }else{
+        if(invUI.cursor<5&&inv.slots[invUI.cursor])inv.active=invUI.cursor;
+      }
     }
     return;
   }
-  if (code === 'Escape') { game.paused = true; accumulator = 0; AudioSys.playSfx('menu'); }
-  else if (code === 'KeyE' || code === 'Space') interact();
-  else if (code === 'KeyQ') inventory.cycleTool();
-  else if (code === 'Digit1' || code === 'Digit2' || code === 'Digit3' || code === 'Digit4' || code === 'Digit5') {
-    const idx = parseInt(code.charAt(5), 10) - 1;
-    if (inventory.slots[idx]) inventory.activeTool = idx;
+  if(game.paused){
+    if(code==='Escape'){game.paused=false;lastT=performance.now();acc=0}
+    return;
   }
-  else if (code === 'KeyI') { invUI.open = true; invUI.mode = 'normal'; invUI.cursor = 0; AudioSys.playSfx('menu'); }
-  else if (code === 'KeyC') { CollectionSys.open = true; AudioSys.playSfx('menu'); }
-  else if (code === 'KeyM') AudioSys.toggleMute();
-  else if (code === 'KeyF') { if (SaveSys.save()) message.show('DIMUAT', 1.2); else message.show('GAGAL SIMPAN', 1.5); }
+  if(game.state==='title'){
+    if(code==='Enter'||code==='Space'||code==='NumpadEnter'){
+      Audio.sfx('enter');
+      game.state='play';game.paused=false;game.time=0;
+      if(game.hasSave){Save.load()}
+      Save.save();
+    }else if(code==='KeyL'&&game.hasSave){
+      Audio.sfx('enter');
+      game.state='play';game.paused=false;game.time=0;
+      Save.load();
+    }
+    return;
+  }
+  if(code==='Escape'){game.paused=true;acc=0;Audio.sfx('menu')}
+  else if(code==='KeyE'||code==='Space')interact();
+  else if(code==='KeyQ')inv.cycle();
+  else if(code==='Digit1'||code==='Digit2'||code==='Digit3'||code==='Digit4'||code==='Digit5'){
+    const i=parseInt(code.charAt(5),10)-1;
+    if(inv.slots[i])inv.active=i;
+  }
+  else if(code==='KeyI'){invUI.open=true;invUI.mode='normal';invUI.cursor=0;Audio.sfx('menu')}
+  else if(code==='KeyC'){Collection.open=true;Audio.sfx('menu')}
+  else if(code==='KeyM')Audio.toggle();
+  else if(code==='KeyF'){if(Save.save())message.show('DISIMPAN',1.2);else message.show('GAGAL SIMPAN',1.5)}
 }
 
-document.addEventListener('visibilitychange', () => {
-  if (document.hidden) SaveSys.save();
-  lastTime = performance.now(); accumulator = 0;
-});
-window.addEventListener('resize', () => resize());
-window.addEventListener('beforeunload', () => SaveSys.save());
-
-/* ---------- 35. INIT ---------- */
-function initInventory() {
-  inventory.slots[0] = { id: 'net',    count: 1 };
-  inventory.slots[1] = { id: 'rod',    count: 1 };
-  inventory.slots[2] = { id: 'shovel', count: 1 };
-  inventory.slots[3] = { id: 'axe',    count: 1 };
-  inventory.slots[4] = { id: 'water',  count: 1 };
-  inventory.slots[5] = { id: 'daun',   count: 3 };
-  inventory.slots[6] = { id: 'bunga',  count: 2 };
-  inventory.slots[7] = { id: 'apel',   count: 2 };
-  inventory.slots[8] = { id: 'umpan',  count: 3 };
-  inventory.activeTool = 0;
+/* ---------- 37. INIT ---------- */
+function initInventory(){
+  inv.slots[0]={id:'net',n:1};
+  inv.slots[1]={id:'rod',n:1};
+  inv.slots[2]={id:'shovel',n:1};
+  inv.slots[3]={id:'axe',n:1};
+  inv.slots[4]={id:'water',n:1};
+  inv.slots[5]={id:'daun',n:3};
+  inv.slots[6]={id:'bunga',n:2};
+  inv.slots[7]={id:'apel',n:2};
+  inv.slots[8]={id:'umpan',n:3};
+  inv.active=0;
 }
-function init() {
+function init(){
   resize();
-  Input.init();
-  AudioSys.init();
-  bakeAllAssets();
-  generateWorld();
-  worldGround = bakeWorldCanvas();
-  generateInterior();
-  for (let i = 0; i < NPC_DEFS.length; i++) npcs.push(createNPC(NPC_DEFS[i]));
+  window.addEventListener('resize',resize);
+  document.addEventListener('visibilitychange',()=>{
+    if(document.hidden)Save.save();
+    lastT=performance.now();acc=0;
+  });
+  window.addEventListener('beforeunload',()=>Save.save());
+
+  bakeSpriteAtlas();
+  spriteTex=makeTexture(atlasCanvas);
+
+  genWorld();
+  buildAllChunks();
+
+  for(const def of NPC_DEFS)npcs.push(makeNPC(def));
   initInventory();
   buildCollectionList();
   Touch.init();
-  player.x = 440; player.y = 372; player.dir = 'down';
-  snapCamera();
-  game.time = 0;
-  game.hasSave = SaveSys.exists();
-  lastTime = performance.now();
-  accumulator = 0;
-  rafId = requestAnimationFrame(frame);
+  game.hasSave=Save.exists();
+
+  player.x=28;player.z=23;player.dir='down';
+  updateCamera(0);
+  lastT=performance.now();
+  acc=0;
+  requestAnimationFrame(frame);
 }
 init();
 </script>
